@@ -32,14 +32,19 @@ fi
 rm -f "$BOOT_FLAG"
 
 export AGENTMEMORY_URL="http://localhost:${AGENTMEMORY_PORT:-3111}"
+export AGENTMEMORY_III_VERSION="${AGENTMEMORY_III_VERSION:-0.11.2}"
 
 echo "[$(date)] Starting agentmemory server..." >> "$LOG"
-nohup npx -y @agentmemory/agentmemory --tools "${AGENTMEMORY_TOOLS:-all}" >> "$LOG" 2>&1 &
+if command -v agentmemory >/dev/null 2>&1; then
+  nohup agentmemory --tools "${AGENTMEMORY_TOOLS:-all}" --verbose >> "$LOG" 2>&1 &
+else
+  nohup npx -y @agentmemory/agentmemory --tools "${AGENTMEMORY_TOOLS:-all}" --verbose >> "$LOG" 2>&1 &
+fi
 echo $! > "$PID_FILE"
 echo "[agentmemory-start] Server started (PID $(cat "$PID_FILE"))"
 
 for i in {1..45}; do
-  if curl -s --max-time 1 "http://localhost:$AGENTMEMORY_PORT/agentmemory/livez" >/dev/null 2>&1; then
+  if curl -fsS --max-time 2 -H "Authorization: Bearer $AGENTMEMORY_SECRET" "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/health" >/dev/null 2>&1; then
     echo "[agentmemory-start] Server ready after ${i}s"
     break
   fi

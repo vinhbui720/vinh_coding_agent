@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Authenticated status for the wrapper-managed agentmemory server.
+set -euo pipefail
+set -a
+source "$HOME/.memory-wrapper/.env"
+set +a
+base="http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory"
+
+tmp_health=$(mktemp)
+tmp_flags=$(mktemp)
+trap 'rm -f "$tmp_health" "$tmp_flags"' EXIT
+
+if ! curl -fsS --max-time 5 -H "Authorization: Bearer $AGENTMEMORY_SECRET" "$base/health" > "$tmp_health"; then
+  echo "agentmemory: not healthy or unauthorized at $base/health" >&2
+  exit 1
+fi
+curl -fsS --max-time 5 -H "Authorization: Bearer $AGENTMEMORY_SECRET" "$base/config/flags" > "$tmp_flags" || true
+
+python3 - "$tmp_health" "$tmp_flags" <<'PY'
+import json, sys
+h=json.load(open(sys.argv[1]))
+try:
+    f=json.load(open(sys.argv[2]))
+except Exception:
+    f={}
+health=h.get('health',{})
+print('agentmemory status')
+print('  health:       %s' % health.get('status', h.get('status','unknown')))
+print('  service:      %s' % h.get('status','unknown'))
+print('  version:      %s' % h.get('version','?'))
+print('  workers:      %s' % len(health.get('workers',[])))
+print('  uptime:       %ss' % round(health.get('uptimeSeconds',0)))
+print('  memory rss:   %.1f MB' % (health.get('memory',{}).get('rss',0)/1048576))
+if f:
+    print('  provider:     %s' % f.get('provider','unknown'))
+    print('  embeddings:   %s' % f.get('embeddingProvider','unknown'))
+    for flag in f.get('flags',[]):
+        if flag.get('key') in ('GRAPH_EXTRACTION_ENABLED','CONSOLIDATION_ENABLED','AGENTMEMORY_AUTO_COMPRESS','AGENTMEMORY_INJECT_CONTEXT'):
+            print('  %-34s %s' % (flag['key']+':', 'ON' if flag.get('enabled') else 'off'))
+PY
