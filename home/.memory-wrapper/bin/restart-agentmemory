@@ -29,10 +29,17 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 
-# Kill known binaries by executable name only, not by matching command text.
-pkill -x agentmemory 2>/dev/null || true
-pkill -x iii-engine 2>/dev/null || true
+# Kill stale agentmemory workers by inspecting process args, excluding this script/shell.
+for pid in $(pgrep -u "$USER" -f 'node .*/bin/agentmemory --tools|npm exec @agentmemory/agentmemory|iii --config .*agentmemory' 2>/dev/null || true); do
+  [ "$pid" = "$$" ] && continue
+  kill "$pid" 2>/dev/null || true
+done
 sleep 2
+for pid in $(pgrep -u "$USER" -f 'node .*/bin/agentmemory --tools|npm exec @agentmemory/agentmemory|iii --config .*agentmemory' 2>/dev/null || true); do
+  [ "$pid" = "$$" ] && continue
+  kill -9 "$pid" 2>/dev/null || true
+done
+rm -f "$HOME/.agentmemory/iii.pid" "$HOME/.agentmemory/engine-state.json"
 
 "$HOME/.memory-wrapper/bin/agentmemory-start"
 
