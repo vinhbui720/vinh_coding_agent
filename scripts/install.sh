@@ -4,8 +4,14 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOME_DIR="$REPO_DIR/home"
 BACKUP_SUFFIX=".backup-$(date +%Y%m%d-%H%M%S)"
+MANAGED_PATHS=(
+  ".wezterm.lua"
+  ".local/bin/jcode-wrappers/wezterm"
+  ".jcode/config.toml"
+  ".jcode/skills/gog-vinh"
+)
 
-link_file() {
+link_path() {
   local src="$1"
   local dst="$2"
   mkdir -p "$(dirname "$dst")"
@@ -22,9 +28,14 @@ link_file() {
   echo "linked $dst -> $src"
 }
 
-while IFS= read -r -d '' file; do
-  rel="${file#$HOME_DIR/}"
-  link_file "$file" "$HOME/$rel"
-done < <(find "$HOME_DIR" -type f -print0)
+for rel in "${MANAGED_PATHS[@]}"; do
+  src="$HOME_DIR/$rel"
+  dst="$HOME/$rel"
+  if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+    echo "SKIP missing repo path: $src" >&2
+    continue
+  fi
+  link_path "$src" "$dst"
+done
 
 echo "Done. Run: bash scripts/validate.sh"

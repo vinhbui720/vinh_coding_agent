@@ -15,6 +15,14 @@ check_link() {
   fi
 }
 
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "FAIL missing command: $1" >&2
+    return 1
+  }
+  echo "OK command: $1"
+}
+
 check_link "$HOME/.wezterm.lua" "$REPO_DIR/home/.wezterm.lua"
 check_link "$HOME/.local/bin/jcode-wrappers/wezterm" "$REPO_DIR/home/.local/bin/jcode-wrappers/wezterm"
 check_link "$HOME/.jcode/config.toml" "$REPO_DIR/home/.jcode/config.toml"
@@ -22,6 +30,11 @@ check_link "$HOME/.jcode/skills/gog-vinh" "$REPO_DIR/home/.jcode/skills/gog-vinh
 
 chmod +x "$REPO_DIR/home/.local/bin/jcode-wrappers/wezterm"
 find "$REPO_DIR/home/.jcode/skills/gog-vinh/scripts" -type f -name '*.sh' -exec chmod +x {} +
+
+require_cmd bash
+require_cmd git
+require_cmd wezterm
+require_cmd jcode
 
 wezterm --config-file "$HOME/.wezterm.lua" show-keys >/dev/null
 jcode --version >/dev/null
