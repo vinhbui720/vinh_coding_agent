@@ -12,7 +12,9 @@ elif [ -s "$HOME/.nvm/nvm.sh" ]; then
   . "$NVM_DIR/nvm.sh"
 fi
 
+set -a
 source "$HOME/.memory-wrapper/.env"
+set +a
 
 # Seed agentmemory state silently (redirect stdout to stderr)
 "$HOME/.memory-wrapper/bin/seed-agentmemory-state" >/dev/null 2>&1 || true

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Restart agentmemory without pkill matching this shell command line.
+set -euo pipefail
+
+if [ -n "${NVM_DIR:-}" ] && [ -s "$NVM_DIR/nvm.sh" ]; then
+  . "$NVM_DIR/nvm.sh"
+elif [ -s "$HOME/.nvm/nvm.sh" ]; then
+  export NVM_DIR="$HOME/.nvm"
+  . "$NVM_DIR/nvm.sh"
+fi
+
+set -a
+source "$HOME/.memory-wrapper/.env"
+set +a
+PID_FILE="$HOME/.memory-wrapper/flags/agentmemory.pid"
+
+# Prefer official stop command. It knows about iii-engine pidfiles.
+if command -v agentmemory >/dev/null 2>&1; then
+  agentmemory stop --force >/dev/null 2>&1 || true
+fi
+
+if [ -f "$PID_FILE" ]; then
+  old_pid=$(cat "$PID_FILE" || true)
+  if [ -n "${old_pid:-}" ] && kill -0 "$old_pid" 2>/dev/null; then
+    kill "$old_pid" 2>/dev/null || true
+    sleep 1
+    kill -9 "$old_pid" 2>/dev/null || true
+  fi
+  rm -f "$PID_FILE"
+fi
+
+# Kill known binaries by executable name only, not by matching command text.
+pkill -x agentmemory 2>/dev/null || true
+pkill -x iii-engine 2>/dev/null || true
+sleep 2
+
+"$HOME/.memory-wrapper/bin/agentmemory-start"
+
+for i in {1..60}; do
+  if curl -fsS --max-time 1 "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/health" >/dev/null 2>&1 || \
+     curl -fsS --max-time 1 "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/livez" >/dev/null 2>&1; then
+    echo "agentmemory healthy after ${i}s"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "agentmemory did not become healthy. Recent log:" >&2
+tail -80 "$HOME/.memory-wrapper/logs/agentmemory.log" >&2 || true
+exit 1

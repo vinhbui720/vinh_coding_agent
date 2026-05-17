@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Configure agentmemory LLM-backed features (compression + graph extraction)
+# Wrapper-only: does not modify agentmemory source.
+set -euo pipefail
+
+ENV_FILE="$HOME/.memory-wrapper/.env"
+mkdir -p "$(dirname "$ENV_FILE")"
+touch "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
+set_kv() {
+  local key="$1" value="$2"
+  if grep -qE "^#?${key}=" "$ENV_FILE"; then
+    sed -i "s|^#\?${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
+
+remove_kv() {
+  local key="$1"
+  sed -i "/^#\?${key}=.*/d" "$ENV_FILE"
+}
+
+# Prefer cheap/non-Claude API providers. Jcode OAuth/session credentials are not API keys.
+PROVIDER="none"
+
+if [ -n "${GEMINI_API_KEY:-}" ]; then
+  set_kv GEMINI_API_KEY "$GEMINI_API_KEY"
+  set_kv EMBEDDING_PROVIDER "gemini"
+  PROVIDER="gemini"
+elif [ -n "${OPENROUTER_API_KEY:-}" ]; then
+  set_kv OPENROUTER_API_KEY "$OPENROUTER_API_KEY"
+  set_kv OPENROUTER_MODEL "${OPENROUTER_MODEL:-google/gemini-2.0-flash-001}"
+  PROVIDER="openrouter"
+elif [ -n "${OPENAI_API_KEY:-}" ]; then
+  set_kv OPENAI_API_KEY "$OPENAI_API_KEY"
+  set_kv OPENAI_MODEL "${OPENAI_MODEL:-gpt-4o-mini}"
+  set_kv OPENAI_REASONING_EFFORT "none"
+  PROVIDER="openai"
+elif [ "${ALLOW_CLAUDE_SUBSCRIPTION_FALLBACK:-false}" = "true" ]; then
+  # This uses Claude subscription / agent-sdk fallback. Not cheapest and Claude-only.
+  set_kv AGENTMEMORY_ALLOW_AGENT_SDK "true"
+  set_kv AGENTMEMORY_AUTO_COMPRESS "true"
+  PROVIDER="claude-subscription-fallback"
+else
+  cat <<'MSG'
+No usable API key found for agentmemory LLM features.
+
+Jcode currently has OAuth/session credentials, but agentmemory needs one of these API-key env vars:
+  export GEMINI_API_KEY=...        # recommended cheap/free-tier option
+  export OPENROUTER_API_KEY=...    # cheap multi-model option
+  export OPENAI_API_KEY=...        # use with OPENAI_MODEL=gpt-4o-mini
+
+Then run:
+  ~/.memory-wrapper/bin/configure-llm-provider
+  ~/.memory-wrapper/bin/restart-agentmemory
+
+Optional Claude subscription fallback, not recommended for cheap/non-Claude:
+  ALLOW_CLAUDE_SUBSCRIPTION_FALLBACK=true ~/.memory-wrapper/bin/configure-llm-provider
+MSG
+  exit 2
+fi
+
+# Enable the desired LLM-backed features.
+set_kv AGENTMEMORY_MODE "full"
+set_kv AGENTMEMORY_AUTO_COMPRESS "true"
+set_kv GRAPH_EXTRACTION_ENABLED "true"
+set_kv CONSOLIDATION_ENABLED "true"
+set_kv AGENTMEMORY_LLM_TIMEOUT_MS "60000"
+set_kv AGENTMEMORY_TOOLS "all"
+
+# Ensure disabled-comment markers from older setup do not override expectations.
+remove_kv COMPRESSION_ENABLED || true
+remove_kv SUMMARIZATION_ENABLED || true
+
+printf 'Configured agentmemory LLM provider: %s\n' "$PROVIDER"
+printf 'Features enabled: AGENTMEMORY_AUTO_COMPRESS=true, GRAPH_EXTRACTION_ENABLED=true\n'

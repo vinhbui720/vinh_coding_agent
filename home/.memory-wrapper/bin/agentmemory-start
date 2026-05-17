@@ -10,7 +10,9 @@ elif [ -s "$HOME/.nvm/nvm.sh" ]; then
   . "$NVM_DIR/nvm.sh"
 fi
 
+set -a
 source "$HOME/.memory-wrapper/.env"
+set +a
 "$WRAPPER_DIR/bin/seed-agentmemory-state" >/dev/null 2>&1 || true
 
 BOOT_FLAG="$WRAPPER_DIR/flags/boot-sync-done"
@@ -29,7 +31,6 @@ fi
 
 rm -f "$BOOT_FLAG"
 
-export AGENTMEMORY_SECRET AGENTMEMORY_TOOLS EMBEDDING_PROVIDER III_BIND AGENTMEMORY_PORT AGENTMEMORY_URL
 export AGENTMEMORY_URL="http://localhost:${AGENTMEMORY_PORT:-3111}"
 
 echo "[$(date)] Starting agentmemory server..." >> "$LOG"
