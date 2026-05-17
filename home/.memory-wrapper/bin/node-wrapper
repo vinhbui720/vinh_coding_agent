@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Wrapper to ensure commands run with nvm's modern Node, not system Node 12.
+set -euo pipefail
+cmd="$(basename "$0")"
+
+if [ -n "${NVM_DIR:-}" ] && [ -s "$NVM_DIR/nvm.sh" ]; then
+  . "$NVM_DIR/nvm.sh"
+elif [ -s "$HOME/.nvm/nvm.sh" ]; then
+  export NVM_DIR="$HOME/.nvm"
+  . "$NVM_DIR/nvm.sh"
+fi
+
+# Prefer default nvm version, otherwise the newest installed version.
+if command -v nvm >/dev/null 2>&1; then
+  nvm use --silent default >/dev/null 2>&1 || nvm use --silent node >/dev/null 2>&1 || true
+fi
+
+case "$cmd" in
+  node)
+    target="${NVM_BIN:-}/node"
+    ;;
+  npm)
+    target="${NVM_BIN:-}/npm"
+    ;;
+  npx)
+    target="${NVM_BIN:-}/npx"
+    ;;
+  *)
+    echo "Unsupported node wrapper command: $cmd" >&2
+    exit 127
+    ;;
+esac
+
+if [ -n "${target:-}" ] && [ -x "$target" ]; then
+  exec "$target" "$@"
+fi
+
+echo "Could not find modern $cmd via nvm. Install/use Node >= 20 first." >&2
+exit 127
