@@ -15,6 +15,22 @@ if command -v nvm >/dev/null 2>&1; then
   nvm use --silent default >/dev/null 2>&1 || nvm use --silent node >/dev/null 2>&1 || true
 fi
 
+# Make direct commands like `npx @agentmemory/agentmemory demo` work with
+# the wrapper-managed authenticated server.
+if [ -f "$HOME/.memory-wrapper/.env" ]; then
+  set -a
+  . "$HOME/.memory-wrapper/.env"
+  set +a
+  export AGENTMEMORY_URL="${AGENTMEMORY_URL:-http://localhost:${AGENTMEMORY_PORT:-3111}}"
+fi
+
+# Upstream `agentmemory demo` currently posts without Authorization headers.
+# When our server has AGENTMEMORY_SECRET enabled, route just the demo through
+# the viewer proxy on :3113, which forwards to the local authenticated server.
+if [ "$cmd" = "npx" ] && [ "${1:-}" = "@agentmemory/agentmemory" ] && [ "${2:-}" = "demo" ]; then
+  export AGENTMEMORY_URL="http://localhost:3113"
+fi
+
 case "$cmd" in
   node)
     target="${NVM_BIN:-}/node"
