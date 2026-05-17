@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
 # MCP command wrapper that loads secret from ~/.memory-wrapper/.env.
+# IMPORTANT: nvm must be sourced in THIS shell, not a subprocess,
+# so that node/npm/npx are on PATH when we exec the MCP binary.
 set -euo pipefail
+
+# Load nvm into current shell
+if [ -n "${NVM_DIR:-}" ] && [ -s "$NVM_DIR/nvm.sh" ]; then
+  . "$NVM_DIR/nvm.sh"
+elif [ -s "$HOME/.nvm/nvm.sh" ]; then
+  export NVM_DIR="$HOME/.nvm"
+  . "$NVM_DIR/nvm.sh"
+fi
+
 source "$HOME/.memory-wrapper/.env"
-"$HOME/.memory-wrapper/bin/_load-node.sh"
-"$HOME/.memory-wrapper/bin/seed-agentmemory-state"
+
+# Seed agentmemory state silently (redirect stdout to stderr)
+"$HOME/.memory-wrapper/bin/seed-agentmemory-state" >/dev/null 2>&1 || true
+
 export AGENTMEMORY_URL="http://localhost:${AGENTMEMORY_PORT:-3111}"
 export AGENTMEMORY_SECRET
 export AGENTMEMORY_FORCE_PROXY=1
+
 if command -v agentmemory-mcp >/dev/null 2>&1; then
   exec agentmemory-mcp
 fi
