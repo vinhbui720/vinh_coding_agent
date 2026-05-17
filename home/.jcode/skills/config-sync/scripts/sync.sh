@@ -56,8 +56,8 @@ if [ -n "$status_lines" ]; then
 fi
 
 counts=$(git rev-list --left-right --count HEAD..."$upstream")
-behind=$(awk '{print $1}' <<<"$counts")
-ahead=$(awk '{print $2}' <<<"$counts")
+ahead=$(awk '{print $1}' <<<"$counts")
+behind=$(awk '{print $2}' <<<"$counts")
 
 echo "==> Remote comparison: behind=$behind ahead=$ahead"
 
