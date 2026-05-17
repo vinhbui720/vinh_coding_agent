@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 # Start agentmemory server and perform optional boot sync.
 set -euo pipefail
+
+# Load nvm into current shell so npx is available
+if [ -n "${NVM_DIR:-}" ] && [ -s "$NVM_DIR/nvm.sh" ]; then
+  . "$NVM_DIR/nvm.sh"
+elif [ -s "$HOME/.nvm/nvm.sh" ]; then
+  export NVM_DIR="$HOME/.nvm"
+  . "$NVM_DIR/nvm.sh"
+fi
+
 source "$HOME/.memory-wrapper/.env"
-"$WRAPPER_DIR/bin/_load-node.sh"
-"$WRAPPER_DIR/bin/seed-agentmemory-state"
+"$WRAPPER_DIR/bin/seed-agentmemory-state" >/dev/null 2>&1 || true
 
 BOOT_FLAG="$WRAPPER_DIR/flags/boot-sync-done"
 LOG="$WRAPPER_DIR/logs/agentmemory.log"
