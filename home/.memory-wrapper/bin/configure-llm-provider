@@ -4,9 +4,20 @@
 set -euo pipefail
 
 ENV_FILE="$HOME/.memory-wrapper/.env"
+UPSTREAM_ENV_FILE="$HOME/.agentmemory/.env"
 mkdir -p "$(dirname "$ENV_FILE")"
 touch "$ENV_FILE"
 chmod 600 "$ENV_FILE"
+
+sync_upstream_env() {
+  mkdir -p "$(dirname "$UPSTREAM_ENV_FILE")"
+  chmod 700 "$(dirname "$UPSTREAM_ENV_FILE")"
+  {
+    echo "# Generated from ~/.memory-wrapper/.env. Do not commit."
+    grep -E '^(AGENTMEMORY_SECRET|AGENTMEMORY_PORT|AGENTMEMORY_TOOLS|AGENTMEMORY_MODE|AGENTMEMORY_AUTO_COMPRESS|AGENTMEMORY_LLM_TIMEOUT_MS|GRAPH_EXTRACTION_ENABLED|CONSOLIDATION_ENABLED|EMBEDDING_PROVIDER|III_BIND|ANTHROPIC_API_KEY|OPENAI_API_KEY|OPENAI_MODEL|OPENAI_REASONING_EFFORT|GEMINI_API_KEY|OPENROUTER_API_KEY|OPENROUTER_MODEL|MINIMAX_API_KEY|AGENTMEMORY_ALLOW_AGENT_SDK)=' "$ENV_FILE" || true
+  } > "$UPSTREAM_ENV_FILE"
+  chmod 600 "$UPSTREAM_ENV_FILE"
+}
 
 set_kv() {
   local key="$1" value="$2"
@@ -76,3 +87,5 @@ remove_kv SUMMARIZATION_ENABLED || true
 
 printf 'Configured agentmemory LLM provider: %s\n' "$PROVIDER"
 printf 'Features enabled: AGENTMEMORY_AUTO_COMPRESS=true, GRAPH_EXTRACTION_ENABLED=true\n'
+sync_upstream_env
+printf 'Synced upstream config: %s\n' "$UPSTREAM_ENV_FILE"
