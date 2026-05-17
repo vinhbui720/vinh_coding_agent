@@ -15,6 +15,7 @@ home/
   .local/bin/jcode-wrappers/wezterm
   .jcode/config.toml
   .jcode/skills/gog-vinh/
+  .jcode/skills/config-sync/
 scripts/
   bootstrap.sh
   install.sh
@@ -30,6 +31,7 @@ docs/
 - Jcode wrapper for WezTerm
 - Jcode config
 - custom `gog-vinh` skill
+- custom `config-sync` skill for git-based sync across machines
 
 ## What is NOT included
 
@@ -69,6 +71,23 @@ These are the paths that should exist in `$HOME` after install:
 - `~/.local/bin/jcode-wrappers/wezterm`
 - `~/.jcode/config.toml`
 - `~/.jcode/skills/gog-vinh`
+- `~/.jcode/skills/config-sync`
+
+## Keeping all machines in sync
+
+Use the sync skill after cloning or after changing config:
+
+```bash
+bash ~/.jcode/skills/config-sync/scripts/sync.sh ~/wezterm-jcode-dotfiles
+```
+
+Behavior:
+- local behind remote -> fast-forward pull
+- local ahead of remote -> push
+- local dirty -> stop and ask for review/commit first
+- local and remote diverged -> stop and print recovery guidance
+
+This avoids silent force-push or silent auto-commit.
 
 ## External skills
 
@@ -87,6 +106,7 @@ If an LLM/agent is setting this up on a different machine, it should check these
    - `~/.local/bin/jcode-wrappers/wezterm` -> `~/wezterm-jcode-dotfiles/home/.local/bin/jcode-wrappers/wezterm`
    - `~/.jcode/config.toml` -> `~/wezterm-jcode-dotfiles/home/.jcode/config.toml`
    - `~/.jcode/skills/gog-vinh` -> `~/wezterm-jcode-dotfiles/home/.jcode/skills/gog-vinh`
+   - `~/.jcode/skills/config-sync` -> `~/wezterm-jcode-dotfiles/home/.jcode/skills/config-sync`
 
 2. **Required binaries**
    - required: `bash`, `git`
@@ -110,6 +130,12 @@ If an LLM/agent is setting this up on a different machine, it should check these
    - Run `bash scripts/validate.sh`
    - If validation fails, fix symlinks first, then missing binaries, then bad paths inside configs/scripts
 
+7. **Sync policy**
+   - Prefer `bash ~/.jcode/skills/config-sync/scripts/sync.sh ~/wezterm-jcode-dotfiles`
+   - Do not force-push automatically
+   - Do not auto-commit unreviewed user changes
+   - If adding new top-level config paths, update `MANAGED_PATHS` in `scripts/install.sh`
+
 ## How to add more tools or wrappers later
 
 1. Put the file or directory under the matching path inside `home/`
@@ -117,3 +143,4 @@ If an LLM/agent is setting this up on a different machine, it should check these
 3. Re-run `bash scripts/install.sh`
 4. Re-run `bash scripts/validate.sh`
 5. Commit the new file
+6. Run the sync skill to publish safely

@@ -9,6 +9,7 @@ MANAGED_PATHS=(
   ".local/bin/jcode-wrappers/wezterm"
   ".jcode/config.toml"
   ".jcode/skills/gog-vinh"
+  ".jcode/skills/config-sync"
 )
 
 link_path() {
