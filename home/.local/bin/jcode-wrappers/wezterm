@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Jcode wrapper: converts `wezterm start ... -- CMD...` or `wezterm start ... --exec CMD...`
+# to `wezterm cli split-pane ... CMD...` when inside a WezTerm pane.
+# Outside WezTerm, falls back to the real GUI start command.
+
+set -euo pipefail
+
+real_wezterm=/usr/bin/wezterm
+log_file="${HOME}/.jcode/logs/wezterm-wrapper.log"
+
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$log_file" 2>/dev/null || true
+}
+
+if [ ! -x "$real_wezterm" ]; then
+  echo "wezterm wrapper error: real wezterm not found at $real_wezterm" >&2
+  exit 127
+fi
+
+log "Called with args: $*"
+log "WEZTERM_PANE=${WEZTERM_PANE:-NOT_SET} WEZTERM_UNIX_SOCKET=${WEZTERM_UNIX_SOCKET:-NOT_SET}"
+
+if [ "${1:-}" = "start" ]; then
+  shift
+  cmd_args=()
+  cwd_arg=""
+  skip_next=false
+  skip_next_key=""
+  cmd_seen=false
+
+  for arg in "$@"; do
+    if $skip_next; then
+      case "$skip_next_key" in
+        --cwd) cwd_arg="$arg" ;;
+      esac
+      skip_next=false
+      skip_next_key=""
+      continue
+    fi
+
+    # Once we see "--" or "--exec", everything after is the command
+    if ! $cmd_seen; then
+      case "$arg" in
+        --)
+          cmd_seen=true
+          continue
+          ;;
+        --exec)
+          cmd_seen=true
+          continue
+          ;;
+        --always-new-process|--backend)
+          [ "$arg" = "--backend" ] && { skip_next=true; skip_next_key="--backend"; }
+          continue
+          ;;
+        --title)
+          skip_next=true
+          skip_next_key="--title"
+          continue
+          ;;
+        --cwd)
+          skip_next=true
+          skip_next_key="--cwd"
+          continue
+          ;;
+        *)
+          continue
+          ;;
+      esac
+    fi
+
+    cmd_args+=("$arg")
+  done
+
+  log "cmd_seen=$cmd_seen cmd_args=(${cmd_args[*]:-}) cwd=$cwd_arg"
+
+  # Split-pane when inside WezTerm and we have a command to run
+  if [ -n "${WEZTERM_PANE:-}" ] && $cmd_seen && [ ${#cmd_args[@]} -gt 0 ]; then
+    split_args=("cli" "split-pane" "--right")
+    [ -n "$cwd_arg" ] && split_args+=("--cwd" "$cwd_arg")
+    split_args+=("--" "${cmd_args[@]}")
+
+    log "Executing: $real_wezterm ${split_args[*]}"
+    pane_id=$("$real_wezterm" "${split_args[@]}" 2>>"$log_file")
+    exit_code=$?
+    log "split-pane result: pane_id=$pane_id exit_code=$exit_code"
+
+    [ $exit_code -eq 0 ] && exit 0
+    log "ERROR: split-pane failed, falling back to wezterm start"
+  fi
+
+  # Fallback to normal start
+  log "Fallback: $real_wezterm start -- ${cmd_args[*]:-}"
+  exec "$real_wezterm" start -- "${cmd_args[@]}"
+fi
+
+# Non-start commands: pass through directly
+log "Passthrough: $real_wezterm $*"
+exec "$real_wezterm" "$@"

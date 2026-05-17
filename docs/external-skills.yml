@@ -1,0 +1,5 @@
+notebooklm:
+  type: git
+  repo: https://github.com/PleasePrompto/notebooklm-skill
+  target: ~/.jcode/skills/notebooklm
+  rationale: Keep upstream source out of this dotfiles repo while documenting setup.
