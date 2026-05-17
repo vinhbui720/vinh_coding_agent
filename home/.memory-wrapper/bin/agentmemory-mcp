@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# MCP command wrapper that loads secret from ~/.memory-wrapper/.env.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+"$HOME/.memory-wrapper/bin/_load-node.sh"
+"$HOME/.memory-wrapper/bin/seed-agentmemory-state"
+export AGENTMEMORY_URL="http://localhost:${AGENTMEMORY_PORT:-3111}"
+export AGENTMEMORY_SECRET
+export AGENTMEMORY_FORCE_PROXY=1
+if command -v agentmemory-mcp >/dev/null 2>&1; then
+  exec agentmemory-mcp
+fi
+exec npx -y @agentmemory/mcp

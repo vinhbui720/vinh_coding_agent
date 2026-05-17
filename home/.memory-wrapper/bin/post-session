@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Push a jcode session transcript to agentmemory.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+TRANSCRIPT_FILE="${1:-}"
+[ -n "$TRANSCRIPT_FILE" ] && [ -f "$TRANSCRIPT_FILE" ] || exit 0
+if ! curl -s --max-time 2 "http://localhost:$AGENTMEMORY_PORT/agentmemory/livez" >/dev/null 2>&1; then
+  exit 0
+fi
+PROJECT=$(pwd)
+CONTENT=$(head -c 8000 "$TRANSCRIPT_FILE")
+JSON_CONTENT=$(printf '%s' "$CONTENT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+curl -s -X POST "http://localhost:$AGENTMEMORY_PORT/agentmemory/observe" \
+  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "{\"project\":\"$PROJECT\",\"type\":\"jcode_session\",\"source\":\"jcode_wrapper\",\"content\":$JSON_CONTENT}" >/dev/null || true

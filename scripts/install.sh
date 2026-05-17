@@ -8,8 +8,10 @@ MANAGED_PATHS=(
   ".wezterm.lua"
   ".local/bin/jcode-wrappers/wezterm"
   ".jcode/config.toml"
+  ".jcode/mcp.json"
   ".jcode/skills/gog-vinh"
   ".jcode/skills/config-sync"
+  ".memory-wrapper"
 )
 
 link_path() {
@@ -29,6 +31,13 @@ link_path() {
   echo "linked $dst -> $src"
 }
 
+link_skill_alias() {
+  local name="$1"
+  mkdir -p "$HOME/.jcode/skills"
+  ln -sfn "$HOME/.memory-wrapper/skills/$name" "$HOME/.jcode/skills/$name"
+  echo "linked skill alias ~/.jcode/skills/$name -> ~/.memory-wrapper/skills/$name"
+}
+
 for rel in "${MANAGED_PATHS[@]}"; do
   src="$HOME_DIR/$rel"
   dst="$HOME/$rel"
@@ -39,4 +48,8 @@ for rel in "${MANAGED_PATHS[@]}"; do
   link_path "$src" "$dst"
 done
 
-echo "Done. Run: bash scripts/validate.sh"
+for skill in sync-memory load-context save-decision bm25-search; do
+  link_skill_alias "$skill"
+done
+
+echo "Done. Run: bash scripts/post-install.sh && bash scripts/validate.sh"

@@ -16,3 +16,9 @@ home/.jcode/update_metadata.json
 home/.jcode/setup_hints.json
 home/.jcode/*cache*.json
 home/.jcode/skills/notebooklm/data/
+
+# Memory wrapper secrets/state
+home/.memory-wrapper/.env
+home/.memory-wrapper/flags/
+home/.memory-wrapper/logs/
+home/.memory-wrapper/external/

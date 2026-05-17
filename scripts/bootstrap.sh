@@ -24,8 +24,14 @@ warn_cmd gog
 echo "==> Installing symlinks"
 bash "$REPO_DIR/scripts/install.sh"
 
+echo "==> Post install setup"
+bash "$REPO_DIR/scripts/post-install.sh"
+
 echo "==> Installing external skills if needed"
 bash "$REPO_DIR/scripts/install-external-skills.sh"
+
+echo "==> Installing memory dependencies"
+"$HOME/.memory-wrapper/bin/install-memory-deps"
 
 echo "==> Running validation"
 bash "$REPO_DIR/scripts/validate.sh"

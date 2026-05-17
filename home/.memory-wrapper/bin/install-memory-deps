@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Clone and install wrapper-only memory dependencies.
+set -euo pipefail
+
+WRAPPER_DIR="$HOME/.memory-wrapper"
+EXTERNAL_DIR="$WRAPPER_DIR/external"
+mkdir -p "$EXTERNAL_DIR"
+
+"$WRAPPER_DIR/bin/_load-node.sh"
+"$WRAPPER_DIR/bin/seed-agentmemory-state"
+
+if [ ! -d "$EXTERNAL_DIR/agentmemory/.git" ]; then
+  git clone https://github.com/rohitg00/agentmemory "$EXTERNAL_DIR/agentmemory"
+else
+  git -C "$EXTERNAL_DIR/agentmemory" pull --ff-only
+fi
+
+npm install -g @agentmemory/agentmemory @agentmemory/mcp
+
+echo "Memory dependencies installed"

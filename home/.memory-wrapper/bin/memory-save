@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Save a durable memory via agentmemory REST API.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+TYPE="${1:-decision}"
+TITLE="${2:-}"
+CONTENT="${3:-}"
+if [ -z "$TITLE" ] || [ -z "$CONTENT" ]; then
+  echo "Usage: $0 <type> <title> <content>" >&2
+  exit 1
+fi
+
+PAYLOAD=$(python3 - <<'PY' "$TYPE" "$TITLE" "$CONTENT"
+import json, sys, os
+mem_type, title, content = sys.argv[1:4]
+project = os.getcwd()
+full = f"[{mem_type}] {title}\nproject: {project}\n{content}"
+print(json.dumps({"content": full, "type": mem_type}))
+PY
+)
+
+curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/remember" \
+  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD"

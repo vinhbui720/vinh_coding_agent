@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Search memories via agentmemory REST API.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+QUERY="${1:-}"
+LIMIT="${2:-5}"
+if [ -z "$QUERY" ]; then
+  echo "Usage: $0 <query> [limit]" >&2
+  exit 1
+fi
+
+PAYLOAD=$(python3 - <<'PY' "$QUERY" "$LIMIT"
+import json, sys
+query = sys.argv[1]
+limit = int(sys.argv[2])
+print(json.dumps({"query": query, "limit": limit}))
+PY
+)
+
+curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/smart-search" \
+  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD"

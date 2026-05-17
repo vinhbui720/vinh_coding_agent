@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Seed ~/.agentmemory state so agentmemory CLI skips first-run onboarding.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+STATE_DIR="$HOME/.agentmemory"
+PREFS="$STATE_DIR/preferences.json"
+mkdir -p "$STATE_DIR"
+
+if [ ! -f "$STATE_DIR/.env" ]; then
+  cat > "$STATE_DIR/.env" <<EOF
+# Seeded by ~/.memory-wrapper/bin/seed-agentmemory-state
+# Optional provider keys can be added later.
+AGENTMEMORY_SECRET=$AGENTMEMORY_SECRET
+AGENTMEMORY_TOOLS=${AGENTMEMORY_TOOLS:-all}
+AGENTMEMORY_URL=http://localhost:${AGENTMEMORY_PORT:-3111}
+EOF
+  chmod 600 "$STATE_DIR/.env"
+fi
+
+if [ ! -f "$PREFS" ]; then
+  python3 - <<'PY'
+from pathlib import Path
+import json, datetime
+prefs = {
+  "schemaVersion": 1,
+  "lastAgent": "jcode",
+  "lastAgents": ["claude-code"],
+  "lastProvider": None,
+  "skipSplash": True,
+  "skipNpxHint": True,
+  "skipGlobalInstall": True,
+  "skipConsoleInstall": True,
+  "firstRunAt": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+}
+p = Path.home()/'.agentmemory'/'preferences.json'
+p.write_text(json.dumps(prefs, indent=2) + "\n")
+PY
+  chmod 600 "$PREFS"
+fi

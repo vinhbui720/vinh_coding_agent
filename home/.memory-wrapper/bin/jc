@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Wrapper for jcode that records transcript for long-term memory.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+TRANSCRIPT=$(mktemp /tmp/jcode-session-XXXXXX.txt)
+cleanup() {
+  if [ -s "$TRANSCRIPT" ]; then
+    "$WRAPPER_DIR/bin/post-session" "$TRANSCRIPT" &
+  fi
+  rm -f "$TRANSCRIPT"
+}
+trap cleanup EXIT
+
+"$JCODE_BIN" "$@" 2>&1 | tee "$TRANSCRIPT"

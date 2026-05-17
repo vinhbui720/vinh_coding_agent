@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Sync memory with configured peers.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+BOOT_FLAG="$WRAPPER_DIR/flags/boot-sync-done"
+LOG="$WRAPPER_DIR/logs/sync.log"
+MODE="${1:-}"
+SYNCED=false
+
+mkdir -p "$WRAPPER_DIR/flags" "$WRAPPER_DIR/logs"
+
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"
+}
+
+sync_peer() {
+  local LABEL="$1"
+  local IP="$2"
+  [ -n "$IP" ] || return 0
+  log "Trying peer: $LABEL ($IP)"
+  if ! curl -s --max-time 3 "http://$IP:$AGENTMEMORY_PORT/agentmemory/livez" >/dev/null 2>&1; then
+    log "  -> $LABEL offline, skipping"
+    return 0
+  fi
+  curl -s -X POST "http://localhost:$AGENTMEMORY_PORT/agentmemory/mesh/register" \
+    -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+    -H "Content-Type: application/json" \
+    -d "{\"peerId\":\"$LABEL\",\"url\":\"http://$IP:$AGENTMEMORY_PORT\",\"secret\":\"$AGENTMEMORY_SECRET\"}" >/dev/null || true
+  RESULT=$(curl -s -X POST "http://localhost:$AGENTMEMORY_PORT/agentmemory/mesh/sync" \
+    -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+    -H "Content-Type: application/json" \
+    -d '{}' 2>&1 || true)
+  log "  -> $LABEL synced: $RESULT"
+  SYNCED=true
+}
+
+if ! curl -s --max-time 2 "http://localhost:$AGENTMEMORY_PORT/agentmemory/livez" >/dev/null 2>&1; then
+  log "agentmemory is not running, abort sync"
+  exit 0
+fi
+
+log "=== Sync start (mode: ${MODE:-normal}) ==="
+[ -n "${PEER_PC2_IP:-}" ] && sync_peer "$PEER_PC2_LABEL" "$PEER_PC2_IP"
+[ -n "${PEER_PC3_IP:-}" ] && sync_peer "$PEER_PC3_LABEL" "$PEER_PC3_IP"
+
+if [ "$SYNCED" = "true" ]; then
+  log "=== Sync complete ==="
+else
+  log "=== No online peers ==="
+fi
+
+if [ "$MODE" = "--boot" ]; then
+  touch "$BOOT_FLAG"
+  log "Boot sync flag set"
+fi
