@@ -74,7 +74,7 @@ done
 # Jcode currently discovers slash-command skills from ~/.claude/skills in
 # addition to ~/.jcode/skills. Mirror the default profile skills there so new
 # Jcode sessions always load the baseline skills on every machine.
-for skill in gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm graph-query crystallize; do
+for skill in agentmemory gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm graph-query crystallize; do
   link_claude_skill_alias "$skill"
 done
 
