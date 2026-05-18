@@ -7,6 +7,9 @@ BOOT_FLAG="$WRAPPER_DIR/flags/boot-sync-done"
 LOG="$WRAPPER_DIR/logs/sync.log"
 MODE="${1:-}"
 SYNCED=false
+API_PORT="${AGENTMEMORY_PORT:-3111}"
+# agentmemory node REST runs on API_PORT+2 (default 3113)
+NODE_PORT=$((API_PORT + 2))
 
 mkdir -p "$WRAPPER_DIR/flags" "$WRAPPER_DIR/logs"
 
@@ -17,32 +20,34 @@ log() {
 sync_peer() {
   local LABEL="$1"
   local IP="$2"
+  local PEER_SECRET="${3:-$AGENTMEMORY_SECRET}"
   [ -n "$IP" ] || return 0
   log "Trying peer: $LABEL ($IP)"
-  if ! curl -s --max-time 3 "http://$IP:$AGENTMEMORY_PORT/agentmemory/livez" >/dev/null 2>&1; then
+  if ! curl -s --max-time 3 "http://$IP:$API_PORT/agentmemory/livez" >/dev/null 2>&1; then
     log "  -> $LABEL offline, skipping"
     return 0
   fi
-  curl -s -X POST "http://localhost:$AGENTMEMORY_PORT/agentmemory/mesh/register" \
+  # Register peer via agentmemory node REST (port NODE_PORT)
+  curl -s -X POST "http://localhost:$NODE_PORT/agentmemory/mesh/peers" \
     -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
     -H "Content-Type: application/json" \
-    -d "{\"peerId\":\"$LABEL\",\"url\":\"http://$IP:$AGENTMEMORY_PORT\",\"secret\":\"$AGENTMEMORY_SECRET\"}" >/dev/null || true
-  RESULT=$(curl -s -X POST "http://localhost:$AGENTMEMORY_PORT/agentmemory/mesh/sync" \
+    -d "{\"name\":\"$LABEL\",\"url\":\"http://$IP:$API_PORT\"}" >/dev/null 2>&1 || true
+  RESULT=$(curl -s -X POST "http://localhost:$NODE_PORT/agentmemory/mesh/sync" \
     -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
     -H "Content-Type: application/json" \
-    -d '{}' 2>&1 || true)
+    -d '{"direction":"both"}' 2>&1 || true)
   log "  -> $LABEL synced: $RESULT"
   SYNCED=true
 }
 
-if ! curl -s --max-time 2 "http://localhost:$AGENTMEMORY_PORT/agentmemory/livez" >/dev/null 2>&1; then
+if ! curl -s --max-time 2 "http://localhost:$API_PORT/agentmemory/livez" >/dev/null 2>&1; then
   log "agentmemory is not running, abort sync"
   exit 0
 fi
 
 log "=== Sync start (mode: ${MODE:-normal}) ==="
-[ -n "${PEER_PC2_IP:-}" ] && sync_peer "$PEER_PC2_LABEL" "$PEER_PC2_IP"
-[ -n "${PEER_PC3_IP:-}" ] && sync_peer "$PEER_PC3_LABEL" "$PEER_PC3_IP"
+[ -n "${PEER_PC2_IP:-}" ] && sync_peer "$PEER_PC2_LABEL" "$PEER_PC2_IP" "${PEER_PC2_SECRET:-}"
+[ -n "${PEER_PC3_IP:-}" ] && sync_peer "$PEER_PC3_LABEL" "$PEER_PC3_IP" "${PEER_PC3_SECRET:-}"
 
 if [ "$SYNCED" = "true" ]; then
   log "=== Sync complete ==="
