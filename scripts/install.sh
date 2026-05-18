@@ -11,6 +11,8 @@ MANAGED_PATHS=(
   ".jcode/mcp.json"
   ".jcode/skills/gog-vinh"
   ".jcode/skills/config-sync"
+  ".jcode/skills/graph-query"
+  ".jcode/skills/crystallize"
   ".memory-wrapper"
 )
 
@@ -65,14 +67,14 @@ for rel in "${MANAGED_PATHS[@]}"; do
   link_path "$src" "$dst"
 done
 
-for skill in sync-memory load-context save-decision bm25-search; do
+for skill in sync-memory load-context save-decision bm25-search graph-query crystallize; do
   link_skill_alias "$skill"
 done
 
 # Jcode currently discovers slash-command skills from ~/.claude/skills in
 # addition to ~/.jcode/skills. Mirror the default profile skills there so new
 # Jcode sessions always load the baseline skills on every machine.
-for skill in gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm; do
+for skill in gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm graph-query crystallize; do
   link_claude_skill_alias "$skill"
 done
 

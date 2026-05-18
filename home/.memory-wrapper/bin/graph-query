@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Query agentmemory knowledge graph by text (semantic search on nodes/edges).
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+QUERY="${1:-}"
+LIMIT="${2:-10}"
+if [ -z "$QUERY" ]; then
+  echo "Usage: $0 <query> [limit]" >&2
+  exit 1
+fi
+
+PAYLOAD=$(python3 -c "import json,sys; print(json.dumps({'query': sys.argv[1], 'limit': int(sys.argv[2])}))" "$QUERY" "$LIMIT")
+
+curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/graph/query" \
+  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD"

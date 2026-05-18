@@ -81,7 +81,7 @@ same_provider_account_failover = true
 
 [agents]
 swarm_spawn_mode = "visible"
-memory_sidecar_enabled = false
+memory_sidecar_enabled = true
 
 [ambient]
 enabled = false

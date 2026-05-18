@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Save a memory AND auto-extract entities/relationships to the knowledge graph in one shot.
+# This is the recommended way to call /save-decision from the skill.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+TYPE="${1:-decision}"
+TITLE="${2:-}"
+CONTENT="${3:-}"
+
+if [ -z "$TITLE" ] || [ -z "$CONTENT" ]; then
+  echo "Usage: $0 <type> <title> <content>" >&2
+  exit 1
+fi
+
+# Build memory payload
+MEM_PAYLOAD=$(python3 - <<'PY' "$TYPE" "$TITLE" "$CONTENT"
+import json, sys, os
+mem_type, title, content = sys.argv[1:4]
+project = os.getcwd()
+full = f"[{mem_type}] {title}\nproject: {project}\n{content}"
+print(json.dumps({"content": full, "type": mem_type}))
+PY
+)
+
+echo "=== [1/2] Saving memory ==="
+MEM_RESULT=$(curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/remember" \
+  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "$MEM_PAYLOAD")
+echo "$MEM_RESULT"
+
+MEM_ID=$(echo "$MEM_RESULT" | python3 -c "
+import json,sys
+try:
+  d=json.load(sys.stdin)
+  print(d.get('id', d.get('memoryId', d.get('memory', {}).get('id', 'unknown'))))
+except:
+  print('unknown')
+" 2>/dev/null || echo "unknown")
+
+echo ""
+echo "=== [2/2] Extracting to knowledge graph ==="
+
+# Build compressed-observation payload compatible with mem::graph-extract
+GRAPH_PAYLOAD=$(python3 - <<'PY' "$TYPE" "$TITLE" "$CONTENT"
+import json, sys
+mem_type, title, content = sys.argv[1:4]
+obs = {
+  "id": f"manual:{title}".replace(" ", "_")[:120],
+  "title": title,
+  "narrative": f"[{mem_type}] {title}\n{content}",
+  "concepts": [],
+  "files": [],
+  "type": mem_type,
+}
+print(json.dumps({"observations": [obs]}))
+PY
+)
+
+GRAPH_RESULT=$(curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/graph/extract" \
+  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "$GRAPH_PAYLOAD")
+echo "$GRAPH_RESULT"
+
+# Parse counts for summary line
+NODES=$(echo "$GRAPH_RESULT" | python3 -c "
+import json,sys
+try:
+  d=json.load(sys.stdin)
+  v=d.get('nodesAdded', d.get('nodes', d.get('nodesCreated', d.get('nodeCount', []))))
+  print(len(v) if isinstance(v, list) else v)
+except:
+  print('?')
+" 2>/dev/null || echo "?")
+
+EDGES=$(echo "$GRAPH_RESULT" | python3 -c "
+import json,sys
+try:
+  d=json.load(sys.stdin)
+  v=d.get('edgesAdded', d.get('edges', d.get('edgesCreated', d.get('edgeCount', []))))
+  print(len(v) if isinstance(v, list) else v)
+except:
+  print('?')
+" 2>/dev/null || echo "?")
+
+echo ""
+echo "✓ Done: memory_id=${MEM_ID}  graph_nodes_added=${NODES}  graph_edges_added=${EDGES}"
+echo "  → Run: ~/.memory-wrapper/bin/graph-query \"${TITLE}\" to see in graph"

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Promote content to a permanent crystal in agentmemory (never decays, never auto-evicted).
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+TITLE="${1:-}"
+CONTENT="${2:-}"
+TAGS="${3:-}"  # optional, comma-separated: "tag1,tag2,tag3"
+
+if [ -z "$TITLE" ] || [ -z "$CONTENT" ]; then
+  echo "Usage: $0 <title> <content> [tag1,tag2,...]" >&2
+  exit 1
+fi
+
+PAYLOAD=$(python3 - <<'PY' "$TITLE" "$CONTENT" "$TAGS"
+import json, sys, os
+title, content, tags_str = sys.argv[1:4]
+project = os.getcwd()
+full_content = f"{title}\nproject: {project}\n{content}"
+tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
+print(json.dumps({"content": full_content, "title": title, "tags": tags}))
+PY
+)
+
+curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/crystallize" \
+  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD"

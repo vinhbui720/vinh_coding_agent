@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Show agentmemory knowledge graph statistics.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+echo "=== Knowledge Graph Stats ==="
+curl -s -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+  "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/graph/stats" | \
+  python3 -c "
+import json, sys
+try:
+  d = json.load(sys.stdin)
+  print(f\"  Total nodes : {d.get('totalNodes', '?')}\")
+  print(f\"  Total edges : {d.get('totalEdges', '?')}\")
+  nbt = d.get('nodesByType', {})
+  if nbt:
+    print('  Nodes by type:')
+    for k,v in sorted(nbt.items()): print(f'    {k}: {v}')
+  ebt = d.get('edgesByType', {})
+  if ebt:
+    print('  Edges by type:')
+    for k,v in sorted(ebt.items()): print(f'    {k}: {v}')
+except Exception as e:
+  sys.stdin.seek(0) if hasattr(sys.stdin,'seek') else None
+  print('(raw):', sys.stdin.read() if hasattr(sys.stdin,'read') else str(e))
+"
+echo ""
+echo "Graph viewer: http://localhost:3113  (tab: Graph)"
