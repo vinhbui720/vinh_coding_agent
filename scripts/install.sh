@@ -38,6 +38,23 @@ link_skill_alias() {
   echo "linked skill alias ~/.jcode/skills/$name -> ~/.memory-wrapper/skills/$name"
 }
 
+link_claude_skill_alias() {
+  local name="$1"
+  local src="$HOME/.jcode/skills/$name"
+  local dst="$HOME/.claude/skills/$name"
+  if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+    echo "SKIP missing skill for ~/.claude alias: $src" >&2
+    return 0
+  fi
+  mkdir -p "$HOME/.claude/skills"
+  if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+    mv "$dst" "${dst}${BACKUP_SUFFIX}"
+    echo "backed up $dst -> ${dst}${BACKUP_SUFFIX}"
+  fi
+  ln -sfn "$src" "$dst"
+  echo "linked skill alias ~/.claude/skills/$name -> ~/.jcode/skills/$name"
+}
+
 for rel in "${MANAGED_PATHS[@]}"; do
   src="$HOME_DIR/$rel"
   dst="$HOME/$rel"
@@ -50,6 +67,13 @@ done
 
 for skill in sync-memory load-context save-decision bm25-search; do
   link_skill_alias "$skill"
+done
+
+# Jcode currently discovers slash-command skills from ~/.claude/skills in
+# addition to ~/.jcode/skills. Mirror the default profile skills there so new
+# Jcode sessions always load the baseline skills on every machine.
+for skill in gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm; do
+  link_claude_skill_alias "$skill"
 done
 
 echo "Done. Run: bash scripts/post-install.sh && bash scripts/validate.sh"

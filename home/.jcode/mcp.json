@@ -1,8 +1,8 @@
 {
   "servers": {
     "agentmemory": {
-      "command": "/home/vinbui/.memory-wrapper/bin/agentmemory-mcp",
-      "args": []
+      "command": "bash",
+      "args": ["-lc", "exec \"$HOME/.memory-wrapper/bin/agentmemory-mcp\""]
     }
   }
 }

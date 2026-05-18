@@ -64,9 +64,9 @@ bing_market = "en-US"
 [auth]
 trusted_external_sources = []
 trusted_external_source_paths = [
-    "claude_code_credentials|/home/vinbui/.claude/.credentials.json",
-    "gemini_cli_oauth_creds|/home/vinbui/.gemini/oauth_creds.json",
-    "openai_codex_auth_json|/home/vinbui/.codex/auth.json",
+    "claude_code_credentials|/home/vinh/.claude/.credentials.json",
+    "gemini_cli_oauth_creds|/home/vinh/.gemini/oauth_creds.json",
+    "openai_codex_auth_json|/home/vinh/.codex/auth.json",
 ]
 
 [provider]

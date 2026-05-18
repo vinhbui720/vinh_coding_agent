@@ -36,6 +36,10 @@ check_link "$HOME/.jcode/skills/load-context" "$HOME/.memory-wrapper/skills/load
 check_link "$HOME/.jcode/skills/save-decision" "$HOME/.memory-wrapper/skills/save-decision"
 check_link "$HOME/.jcode/skills/bm25-search" "$HOME/.memory-wrapper/skills/bm25-search"
 
+for skill in gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm; do
+  check_link "$HOME/.claude/skills/$skill" "$HOME/.jcode/skills/$skill"
+done
+
 chmod +x "$REPO_DIR/home/.local/bin/jcode-wrappers/wezterm"
 find "$REPO_DIR/home/.jcode/skills/gog-vinh/scripts" -type f -name '*.sh' -exec chmod +x {} +
 find "$REPO_DIR/home/.jcode/skills/config-sync/scripts" -type f -name '*.sh' -exec chmod +x {} +
