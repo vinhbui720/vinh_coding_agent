@@ -12,4 +12,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"$JCODE_BIN" "$@" 2>&1 | tee "$TRANSCRIPT"
+# When stdout is a TTY, jcode's TUI requires it — run directly without a pipe.
+# Transcript capture only works in non-TTY contexts (scripting, piped usage).
+if [ -t 1 ]; then
+  exec "$JCODE_BIN" "$@"
+else
+  "$JCODE_BIN" "$@" 2>&1 | tee "$TRANSCRIPT"
+fi

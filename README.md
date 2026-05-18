@@ -58,6 +58,7 @@ What `bootstrap.sh` does:
 - installs top-level managed symlinks into `$HOME`
 - creates `~/.memory-wrapper/.env` if missing
 - appends the memory shell-init block to `~/.bashrc`
+- appends `~/.local/bin/jcode-wrappers` to `PATH` in `~/.bashrc` (must come before `/usr/bin` so the wezterm wrapper shadows the real binary)
 - clones external skills if missing
 - clones and installs `agentmemory` dependencies
 - runs validation
@@ -158,20 +159,35 @@ If an LLM/agent is setting this up on a different machine, it should check these
    - expected for full setup: `wezterm`, `jcode`, `node`, `npm`, `npx`
    - optional for `gog-vinh`: `gog`
 
-3. **Machine-specific paths**
+3. **PATH order for wezterm wrapper**
+   - `~/.local/bin/jcode-wrappers` must appear in `PATH` **before** `/usr/bin`
+   - Without this, `which wezterm` resolves to `/usr/bin/wezterm` and the split-pane wrapper is never called
+   - Verify with: `which wezterm` → should return `~/.local/bin/jcode-wrappers/wezterm`
+   - `post-install.sh` appends this automatically; if it was run on an older version, add manually:
+     ```bash
+     export PATH="$HOME/.local/bin/jcode-wrappers:$PATH"
+     ```
+
+4. **`jc` wrapper must not pipe when stdout is a TTY**
+   - The `jc` script (aliased as `jcode`) uses `| tee` to capture transcripts
+   - Piping destroys the TTY, causing: `Error: jcode TUI requires an interactive terminal`
+   - The fix is already in `home/.memory-wrapper/bin/jc`: it checks `[ -t 1 ]` and `exec`s directly when in a TTY
+   - If the alias `jcode` is missing or points to the raw binary directly, the TUI works but transcript capture is skipped — that is acceptable
+
+5. **Machine-specific paths**
    - Search for absolute paths like `/home/...`, `/tmp/...`, machine-specific repo paths, or old usernames
    - Replace them with relative paths derived from the current script location where possible
    - Keep configs portable: prefer `$(dirname "$0")`, `$HOME`, or repo-relative paths
 
-4. **Secrets and local state**
+6. **Secrets and local state**
    - Never commit auth files, browser state, sessions, caches, or `.memory-wrapper/.env`
    - Keep local secrets outside git
 
-5. **Validation**
+7. **Validation**
    - Run `bash scripts/validate.sh`
    - If validation fails, fix symlinks first, then missing binaries, then bad paths inside configs/scripts
 
-6. **Sync policy**
+8. **Sync policy**
    - Prefer `bash ~/.jcode/skills/config-sync/scripts/sync.sh ~/wezterm-jcode-dotfiles`
    - Do not force-push automatically
    - Do not auto-commit unreviewed user changes
