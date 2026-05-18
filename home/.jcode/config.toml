@@ -127,3 +127,6 @@ enabled = false
 
 [autojudge]
 enabled = false
+
+[skills]
+local_paths = ["./.agents/skills"]
