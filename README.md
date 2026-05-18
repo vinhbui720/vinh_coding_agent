@@ -138,15 +138,53 @@ Common skills:
 - `/save-decision`
 - `/bm25-search`
 
-## External skills
+## Agentmemory quick playbook (cross-machine)
 
-Some skills are intentionally external. See:
+Use this checklist on any machine to ensure Jcode + agentmemory works fully.
 
-- `docs/external-skills.md`
+### 1) Health first
 
-Example: NotebookLM should be installed separately at `~/.jcode/skills/notebooklm`, but `bootstrap.sh` will clone it automatically if missing.
+```bash
+~/.memory-wrapper/bin/memory-doctor
+# auto-repair common issues
+~/.memory-wrapper/bin/memory-doctor --fix
+```
 
-## LLM adaptation checklist
+### 2) Core workflow
+
+```bash
+# Recall context
+~/.memory-wrapper/bin/memory-search "<project/task query>" 7
+
+# Save memory + auto graph extraction
+~/.memory-wrapper/bin/memory-save-and-extract decision "<title>" "<content>"
+
+# Query knowledge graph
+~/.memory-wrapper/bin/graph-query "<query>" 10
+
+# Pin permanent knowledge (never decay)
+~/.memory-wrapper/bin/crystallize "<title>" "<content>" "tag1,tag2"
+```
+
+### 3) Useful status commands
+
+```bash
+~/.memory-wrapper/bin/agentmemory-status
+~/.memory-wrapper/bin/graph-stats
+```
+
+### 4) Jcode skills to use
+
+- `/load-context` for memory + graph + crystals
+- `/save-decision` for save + auto graph-extract
+- `/graph-query` for relationship exploration
+- `/crystallize` for permanent memory
+- `/sync-memory` to sync peers
+
+### 5) Integration principle
+
+Keep Jcode native memory features enabled. Agentmemory wrappers are additive and should enhance recall, graph knowledge, and durable decisions without replacing core Jcode memory behavior.
+
 
 If an LLM/agent is setting this up on a different machine, it should check these items and fix mismatches:
 
