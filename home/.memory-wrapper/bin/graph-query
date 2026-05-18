@@ -12,7 +12,4 @@ fi
 
 PAYLOAD=$(python3 -c "import json,sys; print(json.dumps({'query': sys.argv[1], 'limit': int(sys.argv[2])}))" "$QUERY" "$LIMIT")
 
-curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/graph/query" \
-  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD"
+"$HOME/.memory-wrapper/bin/agentmemory-api" POST /graph/query "$PAYLOAD"

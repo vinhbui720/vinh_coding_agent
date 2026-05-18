@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Unified authenticated agentmemory API caller with graceful endpoint fallback.
+set -euo pipefail
+source "$HOME/.memory-wrapper/.env"
+
+METHOD="${1:-GET}"
+PATH_ONLY="${2:-/health}"
+BODY="${3:-}"
+
+if [[ ! "$PATH_ONLY" =~ ^/ ]]; then
+  PATH_ONLY="/$PATH_ONLY"
+fi
+
+BASE="http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory"
+URL="$BASE$PATH_ONLY"
+
+if [ -n "$BODY" ]; then
+  curl -sS --max-time 20 -X "$METHOD" "$URL" \
+    -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+    -H "Content-Type: application/json" \
+    -d "$BODY"
+else
+  curl -sS --max-time 20 -X "$METHOD" "$URL" \
+    -H "Authorization: Bearer $AGENTMEMORY_SECRET"
+fi

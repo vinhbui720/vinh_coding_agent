@@ -22,7 +22,4 @@ print(json.dumps({"content": full_content, "title": title, "tags": tags}))
 PY
 )
 
-curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/crystallize" \
-  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD"
+"$HOME/.memory-wrapper/bin/agentmemory-api" POST /crystallize "$PAYLOAD"

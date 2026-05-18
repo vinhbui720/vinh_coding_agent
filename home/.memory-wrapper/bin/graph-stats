@@ -4,8 +4,7 @@ set -euo pipefail
 source "$HOME/.memory-wrapper/.env"
 
 echo "=== Knowledge Graph Stats ==="
-curl -s -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
-  "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/graph/stats" | \
+"$HOME/.memory-wrapper/bin/agentmemory-api" GET /graph/stats | \
   python3 -c "
 import json, sys
 try:

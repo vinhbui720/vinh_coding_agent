@@ -1,46 +1,64 @@
 ---
 name: agentmemory
-description: Lưu và tìm kiếm long-term memory qua agentmemory MCP. Dùng khi cần save fact/decision/bug_fix, hoặc recall thông tin cũ.
+description: Bộ kỹ năng đầy đủ để dùng agentmemory qua wrappers (save/search/graph/crystal/sync/health) cùng Jcode memory features.
 ---
 
-# AgentMemory Skill
+# Agentmemory Umbrella Skill
 
-Agentmemory backend chạy tại `http://localhost:3111`. Các helper scripts ở `~/.memory-wrapper/bin/`.
+Mục tiêu: tận dụng tối đa agentmemory, nhưng **không thay thế** memory features sẵn có của Jcode.
 
-## Lưu memory
+## Health & status
+
+```bash
+~/.memory-wrapper/bin/agentmemory-status
+~/.memory-wrapper/bin/graph-stats
+```
+
+## Core memory operations
 
 ```bash
 ~/.memory-wrapper/bin/memory-save <type> "<title>" "<content>"
-```
-
-Types: `fact`, `decision`, `bug_fix`, `convention`, `lesson`
-
-Ví dụ:
-```bash
-~/.memory-wrapper/bin/memory-save fact "OpenClaw gateway port" "Gateway chạy ở port 18789 trên vinhpi"
-~/.memory-wrapper/bin/memory-save bug_fix "WatchdogSec fix" "Xóa WatchdogSec=120 vì openclaw không implement sd_notify"
-~/.memory-wrapper/bin/memory-save decision "Model choice" "Dùng gpt-5.4-mini cho cron jobs nhẹ, gpt-5.5 cho deep dreaming"
-```
-
-## Tìm kiếm memory
-
-```bash
-# Semantic search
 ~/.memory-wrapper/bin/memory-search "<query>" [limit]
-
-# Ví dụ
-~/.memory-wrapper/bin/memory-search "OpenClaw gateway" 5
-~/.memory-wrapper/bin/memory-search "vinhpi systemd service" 10
 ```
 
-## Kết quả trả về
+## Save + auto graph extraction
 
-`memory-save` trả JSON với field `success: true` nếu thành công.  
-`memory-search` trả JSON với array `results[]`, mỗi kết quả có `title`, `score`, `type`.
+```bash
+~/.memory-wrapper/bin/memory-save-and-extract <type> "<title>" "<content>"
+```
 
-## Lưu ý
+## Knowledge graph
 
-- Backend luôn chạy (systemd hoặc background process), gọi trực tiếp không cần khởi động
-- Nếu backend down: `~/.memory-wrapper/bin/restart-agentmemory`
-- Kiểm tra status: `~/.memory-wrapper/bin/agentmemory-status`
-- Prefix `mcp__agentmemory__` là tên tool trong Jcode session (nếu MCP inject được)
+```bash
+~/.memory-wrapper/bin/graph-query "<query>" [limit]
+~/.memory-wrapper/bin/graph-stats
+```
+
+## Permanent crystals (non-decay)
+
+```bash
+~/.memory-wrapper/bin/crystallize "<title>" "<content>" [tag1,tag2,...]
+```
+
+## Sync mesh peers
+
+```bash
+~/.memory-wrapper/bin/sync-memory --once
+```
+
+## Direct API (advanced)
+
+Dùng wrapper chung để gọi bất kỳ endpoint nào:
+
+```bash
+~/.memory-wrapper/bin/agentmemory-api GET /health
+~/.memory-wrapper/bin/agentmemory-api POST /graph/query '{"query":"franka task manager","limit":10}'
+```
+
+## Recommended flow with Jcode
+
+1. Bắt đầu task: `/load-context`
+2. Trong task: `/save-decision` (hoặc trực tiếp `memory-save-and-extract`)
+3. Khi cần rel graph: `/graph-query`
+4. Kiến thức bất biến: `/crystallize`
+5. Cuối task: lưu lesson + sync nếu multi-machine

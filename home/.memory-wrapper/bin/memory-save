@@ -20,7 +20,4 @@ print(json.dumps({"content": full, "type": mem_type}))
 PY
 )
 
-curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/remember" \
-  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD"
+"$HOME/.memory-wrapper/bin/agentmemory-api" POST /remember "$PAYLOAD"

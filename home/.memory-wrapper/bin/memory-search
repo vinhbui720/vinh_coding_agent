@@ -18,7 +18,4 @@ print(json.dumps({"query": query, "limit": limit}))
 PY
 )
 
-curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/smart-search" \
-  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD"
+"$HOME/.memory-wrapper/bin/agentmemory-api" POST /smart-search "$PAYLOAD"

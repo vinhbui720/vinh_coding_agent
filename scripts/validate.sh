@@ -35,8 +35,10 @@ check_link "$HOME/.jcode/skills/sync-memory" "$HOME/.memory-wrapper/skills/sync-
 check_link "$HOME/.jcode/skills/load-context" "$HOME/.memory-wrapper/skills/load-context"
 check_link "$HOME/.jcode/skills/save-decision" "$HOME/.memory-wrapper/skills/save-decision"
 check_link "$HOME/.jcode/skills/bm25-search" "$HOME/.memory-wrapper/skills/bm25-search"
+check_link "$HOME/.jcode/skills/graph-query" "$HOME/.memory-wrapper/skills/graph-query"
+check_link "$HOME/.jcode/skills/crystallize" "$HOME/.memory-wrapper/skills/crystallize"
 
-for skill in gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm; do
+for skill in gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm graph-query crystallize; do
   check_link "$HOME/.claude/skills/$skill" "$HOME/.jcode/skills/$skill"
 done
 
@@ -59,5 +61,7 @@ grep -Fq '# >>> MEMORY WRAPPER >>>' "$HOME/.bashrc"
 wezterm --config-file "$HOME/.wezterm.lua" show-keys >/dev/null
 jcode --version >/dev/null
 python3 -m json.tool "$HOME/.jcode/mcp.json" >/dev/null
+"$HOME/.memory-wrapper/bin/agentmemory-status" >/dev/null
+"$HOME/.memory-wrapper/bin/graph-stats" >/dev/null
 
 echo "Validation passed"
