@@ -38,7 +38,7 @@ check_link "$HOME/.jcode/skills/bm25-search" "$HOME/.memory-wrapper/skills/bm25-
 check_link "$HOME/.jcode/skills/graph-query" "$HOME/.memory-wrapper/skills/graph-query"
 check_link "$HOME/.jcode/skills/crystallize" "$HOME/.memory-wrapper/skills/crystallize"
 
-for skill in agentmemory gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm graph-query crystallize; do
+for skill in agentmemory gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm graph-query crystallize diagnose grill-with-docs improve-codebase-architecture prototype setup-matt-pocock-skills tdd to-issues to-prd triage zoom-out caveman grill-me handoff write-a-skill git-guardrails-claude-code setup-pre-commit; do
   check_link "$HOME/.claude/skills/$skill" "$HOME/.jcode/skills/$skill"
 done
 

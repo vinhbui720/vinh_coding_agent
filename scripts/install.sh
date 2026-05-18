@@ -13,6 +13,25 @@ MANAGED_PATHS=(
   ".jcode/skills/config-sync"
   ".jcode/skills/graph-query"
   ".jcode/skills/crystallize"
+  # Matt Pocock engineering skills
+  ".jcode/skills/diagnose"
+  ".jcode/skills/grill-with-docs"
+  ".jcode/skills/improve-codebase-architecture"
+  ".jcode/skills/prototype"
+  ".jcode/skills/setup-matt-pocock-skills"
+  ".jcode/skills/tdd"
+  ".jcode/skills/to-issues"
+  ".jcode/skills/to-prd"
+  ".jcode/skills/triage"
+  ".jcode/skills/zoom-out"
+  # Matt Pocock productivity skills
+  ".jcode/skills/caveman"
+  ".jcode/skills/grill-me"
+  ".jcode/skills/handoff"
+  ".jcode/skills/write-a-skill"
+  # Matt Pocock misc skills
+  ".jcode/skills/git-guardrails-claude-code"
+  ".jcode/skills/setup-pre-commit"
   ".memory-wrapper"
 )
 
@@ -74,7 +93,7 @@ done
 # Jcode currently discovers slash-command skills from ~/.claude/skills in
 # addition to ~/.jcode/skills. Mirror the default profile skills there so new
 # Jcode sessions always load the baseline skills on every machine.
-for skill in agentmemory gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm graph-query crystallize; do
+for skill in agentmemory gog-vinh config-sync sync-memory load-context save-decision bm25-search notebooklm graph-query crystallize diagnose grill-with-docs improve-codebase-architecture prototype setup-matt-pocock-skills tdd to-issues to-prd triage zoom-out caveman grill-me handoff write-a-skill git-guardrails-claude-code setup-pre-commit; do
   link_claude_skill_alias "$skill"
 done
 
