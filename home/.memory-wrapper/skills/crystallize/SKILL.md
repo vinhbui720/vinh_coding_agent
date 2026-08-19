@@ -45,23 +45,21 @@ Ví dụ:
 ```
 
 ### Hoặc gọi REST trực tiếp
-```bash
-source "$HOME/.memory-wrapper/.env"
-curl -s -X POST "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/crystallize" \
-  -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": "<nội dung>",
-    "title": "<tiêu đề>",
-    "tags": ["tag1", "tag2"]
-  }'
-```
+
+API hiện tại **không nhận raw title/content trực tiếp**. Phải:
+
+1. `POST /agentmemory/actions` tạo action.
+2. `POST /agentmemory/actions/update` mark action `done`.
+3. `POST /agentmemory/crystals/create` với `actionIds`.
+4. Verify bằng `GET /agentmemory/crystals`.
+
+Prefer dùng helper `~/.memory-wrapper/bin/crystallize` vì helper đã làm đủ 4 bước và fail nếu verify không thấy crystal.
 
 ### Xem danh sách crystals hiện có
 ```bash
 source "$HOME/.memory-wrapper/.env"
 curl -s -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
-  "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/crystal-list"
+  "http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/crystals"
 ```
 
 ## Sau khi crystallize

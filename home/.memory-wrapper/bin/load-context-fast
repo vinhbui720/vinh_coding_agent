@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Compact agentmemory context loader for low-token, low-latency skill usage.
+
+Default behavior:
+- verify service health
+- run one compact memory search
+- optionally run graph query and crystal-list
+- emit a small JSON summary suitable for direct user-facing summarization
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+HOME = Path.home()
+BIN = HOME / ".memory-wrapper" / "bin"
+
+
+def run_json(cmd: list[str], required: bool = True) -> Any:
+    proc = subprocess.run(cmd, text=True, capture_output=True)
+    if proc.returncode != 0:
+        if required:
+            raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"command failed: {' '.join(cmd)}")
+        return None
+    text = (proc.stdout or "").strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        if required:
+            raise
+        return None
+
+
+def run_status() -> dict[str, Any]:
+    proc = subprocess.run([str(BIN / "agentmemory-status")], text=True, capture_output=True)
+    ok = proc.returncode == 0
+    out = (proc.stdout or "") + (proc.stderr or "")
+    health = "unknown"
+    workers = None
+    for line in out.splitlines():
+        s = line.strip()
+        if s.startswith("health:"):
+            health = s.split(":", 1)[1].strip()
+        elif s.startswith("workers:"):
+            workers = s.split(":", 1)[1].strip()
+    return {
+        "ok": ok,
+        "health": health,
+        "workers": workers,
+        "raw": out.strip(),
+    }
+
+
+def compact_memories(data: Any, limit: int) -> list[dict[str, Any]]:
+    results = []
+    rows = []
+    if isinstance(data, dict):
+        rows = data.get("results") or []
+    for row in rows[:limit]:
+        if not isinstance(row, dict):
+            continue
+        results.append({
+            "title": row.get("title"),
+            "type": row.get("type"),
+            "score": row.get("score"),
+            "timestamp": row.get("timestamp"),
+            "obsId": row.get("obsId"),
+        })
+    return results
+
+
+def compact_graph(data: Any, limit: int) -> dict[str, Any] | None:
+    if not isinstance(data, dict):
+        return None
+    nodes = []
+    for row in (data.get("nodes") or [])[:limit]:
+        if not isinstance(row, dict):
+            continue
+        nodes.append({
+            "name": row.get("name"),
+            "type": row.get("type"),
+            "id": row.get("id"),
+        })
+    edges = []
+    for row in (data.get("edges") or [])[:limit]:
+        if not isinstance(row, dict):
+            continue
+        edges.append({
+            "type": row.get("type"),
+            "from": row.get("from") or row.get("source"),
+            "to": row.get("to") or row.get("target"),
+        })
+    return {"nodes": nodes, "edges": edges, "depth": data.get("depth")}
+
+
+def crystals_summary(data: Any) -> dict[str, Any] | None:
+    if data is None:
+        return None
+    if isinstance(data, list):
+        return {"count": len(data), "items": data[:5]}
+    if isinstance(data, dict):
+        items = None
+        for key in ("crystals", "items", "results", "data"):
+            if isinstance(data.get(key), list):
+                items = data[key]
+                break
+        if items is not None:
+            return {"count": len(items), "items": items[:5]}
+        return {"count": 0, "items": []}
+    return None
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Compact load-context helper for agentmemory")
+    ap.add_argument("query", help="project/task query")
+    ap.add_argument("--memory-limit", type=int, default=3)
+    ap.add_argument("--graph-limit", type=int, default=5)
+    ap.add_argument("--skip-graph", action="store_true")
+    ap.add_argument("--with-crystals", action="store_true")
+    ap.add_argument("--json-pretty", action="store_true")
+    args = ap.parse_args()
+
+    status = run_status()
+    out: dict[str, Any] = {
+        "query": args.query,
+        "status": {k: v for k, v in status.items() if k != "raw"},
+    }
+    if not status["ok"]:
+        out["error"] = "agentmemory_not_ready"
+        out["diagnostic"] = status["raw"]
+        print(json.dumps(out, indent=2 if args.json_pretty else None))
+        return 0
+
+    mem = run_json([str(BIN / "memory-search"), args.query, str(args.memory_limit)], required=False)
+    out["memories"] = compact_memories(mem, args.memory_limit)
+
+    if not args.skip_graph:
+        graph = run_json([str(BIN / "graph-query"), args.query, str(args.graph_limit)], required=False)
+        out["graph"] = compact_graph(graph, args.graph_limit)
+
+    if args.with_crystals:
+        crystals = run_json([str(BIN / "agentmemory-api"), "GET", "/crystal-list"], required=False)
+        out["crystals"] = crystals_summary(crystals)
+
+    print(json.dumps(out, indent=2 if args.json_pretty else None))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

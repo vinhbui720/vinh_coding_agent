@@ -2,6 +2,16 @@ local wezterm = require 'wezterm'
 local act = wezterm.action
 local config = wezterm.config_builder()
 
+-- Enable inline image rendering used by Jcode Mermaid diagrams and image previews.
+config.enable_kitty_graphics = true
+-- Advertise a widely-supported 256-color terminal.  `TERM=wezterm` can make
+-- some shells/apps lose colors when their terminfo lookup differs from WezTerm's.
+config.term = 'xterm-256color'
+config.set_environment_variables = {
+    TERM = 'xterm-256color',
+    JCODE_ENABLE_MERMAID = '1',
+}
+
 local function shell_escape(s)
     return wezterm.shell_quote_arg(s or '')
 end
@@ -83,21 +93,28 @@ end)
 config.font = wezterm.font("BlexMono Nerd Font Mono")
 config.font_size = 13.0
 config.line_height = 1.2
+-- Jcode/Kitty image protocol uses private-use placeholder glyphs (e.g. U+10eeee).
+-- WezTerm may warn that no font contains them even though the image protocol handles them.
+config.warn_about_missing_glyphs = false
 
 config.initial_cols = 100
 config.initial_rows = 30
 
 -- Appearance
-config.color_scheme = "tokyonight_night"
+-- Use the built-in WezTerm scheme name.  The old `tokyonight_night` name is
+-- common in other tools but is not the canonical WezTerm scheme name.
+config.color_scheme = "Tokyo Night"
 -- Transparent windows are expensive on GNOME/X11 and can make the whole window
 -- lag while dragging/resizing because the compositor must blend every frame.
-config.window_background_opacity = 0.95
+config.window_background_opacity = 1.0
 config.window_decorations = 'TITLE | RESIZE'
 config.scrollback_lines = 5000
 
 -- Performance: keep rendering predictable while moving/resizing windows.
-config.max_fps = 60
+config.max_fps = 30
 config.animation_fps = 1
+config.cursor_blink_rate = 0
+config.enable_scroll_bar = false
 
 -- Avoid WebGPU/adapter switching glitches on hybrid Intel/NVIDIA laptops.
 -- OpenGL is usually smoother for X11 window moves under GNOME/Mutter.
@@ -105,9 +122,30 @@ config.front_end = 'OpenGL'
 
 config.colors = {
     background = "#000000",
+    foreground = "#c0caf5",
     cursor_bg = "#7aa2f7",
     cursor_fg = "#1a1b26",
     cursor_border = "#7aa2f7",
+    ansi = {
+        "#15161e", -- black
+        "#f7768e", -- red
+        "#9ece6a", -- green
+        "#e0af68", -- yellow
+        "#7aa2f7", -- blue
+        "#bb9af7", -- magenta
+        "#7dcfff", -- cyan
+        "#a9b1d6", -- white
+    },
+    brights = {
+        "#414868", -- bright black
+        "#f7768e", -- bright red
+        "#9ece6a", -- bright green
+        "#e0af68", -- bright yellow
+        "#7aa2f7", -- bright blue
+        "#bb9af7", -- bright magenta
+        "#7dcfff", -- bright cyan
+        "#c0caf5", -- bright white
+    },
     -- Pane split border colors
     split = "#7aa2f7",
 }
@@ -179,22 +217,42 @@ config.colors.tab_bar = {
 -- =============================================================================
 -- Inactive pane dimming (helps distinguish active agent)
 -- =============================================================================
+-- Inactive pane dimming costs extra compositor work on GNOME/X11; keep panes full-bright for responsiveness.
 config.inactive_pane_hsb = {
-    saturation = 0.7,
-    brightness = 0.6,
+    saturation = 1.0,
+    brightness = 1.0,
 }
 
--- =============================================================================
--- Helper: spawn jcode in a split pane
--- =============================================================================
-local function jcode_split(direction, percent)
-    return act.SplitPane {
+local jcode_args = { 'env', 'JCODE_NO_AUTO_UPDATE=1', 'jcode', '--quiet', '--no-update', '-p', 'openai', '-m', 'gpt-5.4' }
+
+local function pane_cwd(pane)
+    local cwd_url = pane:get_current_working_dir()
+    if cwd_url and cwd_url.file_path and cwd_url.file_path ~= '' then
+        return cwd_url.file_path
+    end
+    return nil
+end
+
+local function split_jcode_from_pane(pane, direction, size)
+    pane:split {
         direction = direction,
-        size = { Percent = percent or 50 },
-        command = wezterm.action_callback(function(window, pane)
-            -- no-op: will be handled by SpawnCommandInNewPane
-        end),
+        size = size,
+        cwd = pane_cwd(pane),
+        args = jcode_args,
     }
+end
+
+local function spawn_jcode_tab_from_pane(window, pane, extra_args)
+    local args = jcode_args
+    if extra_args then
+        args = {}
+        for _, value in ipairs(jcode_args) do table.insert(args, value) end
+        for _, value in ipairs(extra_args) do table.insert(args, value) end
+    end
+    window:perform_action(act.SpawnCommandInNewTab {
+        cwd = pane_cwd(pane),
+        args = args,
+    }, pane)
 end
 
 -- =============================================================================
@@ -219,25 +277,21 @@ config.keys = {
     -- =========================================================================
     {
         key = 'j', mods = 'LEADER',
-        action = act.SplitPane {
-            direction = 'Right',
-            size = { Percent = 50 },
-            command = { args = { 'jcode' } },
-        },
+        action = wezterm.action_callback(function(window, pane)
+            split_jcode_from_pane(pane, 'Right', 0.5)
+        end),
     },
     {
         key = 'j', mods = 'LEADER|SHIFT',
-        action = act.SplitPane {
-            direction = 'Down',
-            size = { Percent = 40 },
-            command = { args = { 'jcode' } },
-        },
+        action = wezterm.action_callback(function(window, pane)
+            split_jcode_from_pane(pane, 'Bottom', 0.4)
+        end),
     },
     {
         key = 'n', mods = 'LEADER',
-        action = act.SpawnCommandInNewTab {
-            args = { 'jcode' },
-        },
+        action = wezterm.action_callback(function(window, pane)
+            spawn_jcode_tab_from_pane(window, pane)
+        end),
     },
 
     -- Spawn multiple agent grid: Ctrl+A then g
@@ -249,19 +303,22 @@ config.keys = {
             local right_pane = pane:split {
                 direction = 'Right',
                 size = 0.5,
-                args = { 'jcode' },
+                cwd = pane_cwd(pane),
+                args = jcode_args,
             }
             -- Split bottom-left -> jcode agent 3
             pane:split {
                 direction = 'Bottom',
                 size = 0.5,
-                args = { 'jcode' },
+                cwd = pane_cwd(pane),
+                args = jcode_args,
             }
             -- Split bottom-right -> jcode agent 4
             right_pane:split {
                 direction = 'Bottom',
                 size = 0.5,
-                args = { 'jcode' },
+                cwd = pane_cwd(pane),
+                args = jcode_args,
             }
         end),
     },
@@ -273,7 +330,8 @@ config.keys = {
             pane:split {
                 direction = 'Right',
                 size = 0.5,
-                args = { 'jcode' },
+                cwd = pane_cwd(pane),
+                args = jcode_args,
             }
         end),
     },
@@ -283,12 +341,14 @@ config.keys = {
             local p2 = pane:split {
                 direction = 'Right',
                 size = 0.66,
-                args = { 'jcode' },
+                cwd = pane_cwd(pane),
+                args = jcode_args,
             }
             p2:split {
                 direction = 'Right',
                 size = 0.5,
-                args = { 'jcode' },
+                cwd = pane_cwd(pane),
+                args = jcode_args,
             }
         end),
     },
@@ -296,11 +356,17 @@ config.keys = {
     -- Resume last session in a split: Ctrl+A then r
     {
         key = 'r', mods = 'LEADER',
-        action = act.SplitPane {
-            direction = 'Right',
-            size = { Percent = 50 },
-            command = { args = { 'jcode', '--resume' } },
-        },
+        action = wezterm.action_callback(function(window, pane)
+            local args = {}
+            for _, value in ipairs(jcode_args) do table.insert(args, value) end
+            table.insert(args, '--resume')
+            pane:split {
+                direction = 'Right',
+                size = 0.5,
+                cwd = pane_cwd(pane),
+                args = args,
+            }
+        end),
     },
 
     -- =========================================================================
@@ -339,6 +405,9 @@ config.keys = {
     -- =========================================================================
     { key = 'k',     mods = 'CTRL',  action = act.SendString 'clear\n' },
     { key = 'Enter', mods = 'ALT',   action = act.ToggleFullScreen },
+    { key = 'F2',    mods = 'NONE',  action = wezterm.action_callback(function(window, pane)
+        wezterm.run_child_process { '/home/vinh/bin/jcode-stop-tts' }
+    end) },
 
     -- Enter Resize Mode (CTRL+SHIFT+R)
     {

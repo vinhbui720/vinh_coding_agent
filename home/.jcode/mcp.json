@@ -2,7 +2,30 @@
   "servers": {
     "agentmemory": {
       "command": "bash",
-      "args": ["-lc", "exec \"$HOME/.memory-wrapper/bin/agentmemory-mcp\""]
+      "args": [
+        "-lc",
+        "exec \"$HOME/.memory-wrapper/bin/agentmemory-mcp\""
+      ]
+    },
+    "headroom": {
+      "command": "/home/vinh/.local/bin/headroom",
+      "args": [
+        "mcp",
+        "serve"
+      ],
+      "env": {
+        "HEADROOM_TELEMETRY": "off"
+      }
+    },
+    "blender": {
+      "command": "/home/vinh/bin/blender-mcp-28554",
+      "args": [],
+      "env": {
+        "BLENDER_HOST": "localhost",
+        "BLENDER_PORT": "28554",
+        "DISABLE_TELEMETRY": "true"
+      },
+      "shared": false
     }
   }
 }

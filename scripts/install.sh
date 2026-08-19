@@ -6,6 +6,7 @@ HOME_DIR="$REPO_DIR/home"
 BACKUP_SUFFIX=".backup-$(date +%Y%m%d-%H%M%S)"
 MANAGED_PATHS=(
   ".wezterm.lua"
+  ".config/nvim"
   ".local/bin/jcode-wrappers/wezterm"
   ".jcode/config.toml"
   ".jcode/mcp.json"

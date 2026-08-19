@@ -1,25 +1,101 @@
 #!/usr/bin/env bash
-# Promote content to a permanent crystal in agentmemory (never decays, never auto-evicted).
+# Promote content to a permanent crystal in agentmemory.
+# Current agentmemory crystallization API requires completed actionIds, so this
+# helper creates a done action, then POSTs /agentmemory/crystals/create.
 set -euo pipefail
 source "$HOME/.memory-wrapper/.env"
 
 TITLE="${1:-}"
 CONTENT="${2:-}"
-TAGS="${3:-}"  # optional, comma-separated: "tag1,tag2,tag3"
+TAGS="${3:-}" # optional comma-separated: "tag1,tag2,tag3"
+PROJECT="${AGENTMEMORY_PROJECT:-$(pwd)}"
 
 if [ -z "$TITLE" ] || [ -z "$CONTENT" ]; then
   echo "Usage: $0 <title> <content> [tag1,tag2,...]" >&2
   exit 1
 fi
 
-PAYLOAD=$(python3 - <<'PY' "$TITLE" "$CONTENT" "$TAGS"
-import json, sys, os
-title, content, tags_str = sys.argv[1:4]
-project = os.getcwd()
-full_content = f"{title}\nproject: {project}\n{content}"
-tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
-print(json.dumps({"content": full_content, "title": title, "tags": tags}))
+api() {
+  local method="$1"
+  local path="$2"
+  local body="${3:-}"
+  local url="http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory${path}"
+  if [ -n "$body" ]; then
+    curl -sS --fail-with-body --max-time 60 -X "$method" "$url" \
+      -H "Authorization: Bearer $AGENTMEMORY_SECRET" \
+      -H "Content-Type: application/json" \
+      -d "$body"
+  else
+    curl -sS --fail-with-body --max-time 60 -X "$method" "$url" \
+      -H "Authorization: Bearer $AGENTMEMORY_SECRET"
+  fi
+}
+
+CREATE_PAYLOAD=$(python3 - <<'PY' "$TITLE" "$CONTENT" "$TAGS" "$PROJECT"
+import json, sys
+title, content, tags_str, project = sys.argv[1:5]
+tags = [t.strip() for t in tags_str.split(',') if t.strip()] if tags_str else []
+full = f"{title}\nproject: {project}\n{content}"
+print(json.dumps({
+    "title": title,
+    "description": full,
+    "project": project,
+    "createdBy": "memory-wrapper/crystallize",
+    "tags": tags,
+}))
 PY
 )
 
-"$HOME/.memory-wrapper/bin/agentmemory-api" POST /crystallize "$PAYLOAD"
+echo "=== [1/3] Creating completed action for crystal source ==="
+CREATE_RESULT=$(api POST /actions "$CREATE_PAYLOAD")
+echo "$CREATE_RESULT"
+ACTION_ID=$(echo "$CREATE_RESULT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("action",{}).get("id",""))')
+if [ -z "$ACTION_ID" ]; then
+  echo "ERROR: action creation did not return action.id" >&2
+  exit 1
+fi
+
+UPDATE_PAYLOAD=$(python3 - <<'PY' "$ACTION_ID" "$CONTENT"
+import json, sys
+action_id, content = sys.argv[1:3]
+print(json.dumps({"actionId": action_id, "status": "done", "result": content}))
+PY
+)
+
+echo ""
+echo "=== [2/3] Marking action done ==="
+UPDATE_RESULT=$(api POST /actions/update "$UPDATE_PAYLOAD")
+echo "$UPDATE_RESULT"
+UPDATE_OK=$(echo "$UPDATE_RESULT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("1" if d.get("success") else "")')
+if [ -z "$UPDATE_OK" ]; then
+  echo "ERROR: action update failed" >&2
+  exit 1
+fi
+
+CRYSTAL_PAYLOAD=$(python3 - <<'PY' "$ACTION_ID" "$PROJECT"
+import json, sys
+action_id, project = sys.argv[1:3]
+print(json.dumps({"actionIds": [action_id], "sessionId": "memory-wrapper/crystallize", "project": project}))
+PY
+)
+
+echo ""
+echo "=== [3/3] Creating crystal ==="
+CRYSTAL_RESULT=$(api POST /crystals/create "$CRYSTAL_PAYLOAD")
+echo "$CRYSTAL_RESULT"
+CRYSTAL_ID=$(echo "$CRYSTAL_RESULT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("crystal",{}).get("id",""))')
+if [ -z "$CRYSTAL_ID" ]; then
+  echo "ERROR: crystal creation did not return crystal.id" >&2
+  exit 1
+fi
+
+VERIFY=$(api GET /crystals)
+FOUND=$(echo "$VERIFY" | CRYSTAL_ID="$CRYSTAL_ID" python3 -c 'import json,sys,os; d=json.load(sys.stdin); cid=os.environ["CRYSTAL_ID"]; print("1" if any(c.get("id")==cid for c in d.get("crystals", [])) else "")')
+if [ -z "$FOUND" ]; then
+  echo "ERROR: created crystal $CRYSTAL_ID not found in /crystals list" >&2
+  exit 1
+fi
+
+echo ""
+echo "✓ Done: action_id=${ACTION_ID}  crystal_id=${CRYSTAL_ID}"
+echo "  → Run: curl -H 'Authorization: Bearer \$AGENTMEMORY_SECRET' http://localhost:${AGENTMEMORY_PORT:-3111}/agentmemory/crystals"

@@ -5,6 +5,7 @@ scroll_page_up = "alt+u"
 scroll_page_down = "alt+d"
 model_switch_next = "ctrl+tab"
 model_switch_prev = "ctrl+shift+tab"
+fallback_switch = "ctrl+y"
 effort_increase = "alt+right"
 effort_decrease = "alt+left"
 centered_toggle = "alt+c"
@@ -17,26 +18,35 @@ workspace_left = "alt+h"
 workspace_down = "alt+j"
 workspace_up = "alt+k"
 workspace_right = "alt+l"
+side_panel_toggle = "alt+m"
+copy_selection_toggle = "alt+y"
+diagram_pane_toggle = "alt+t"
+typing_scroll_lock_toggle = "alt+s"
+diff_mode_cycle = "alt+g"
+info_widget_toggle = "alt+i"
+swarm_panel_focus = "alt+w"
+new_terminal = "alt+shift+;"
+open_resume = "alt+r"
 session_picker_enter = "new-terminal"
 
 [dictation]
-command = ""
+command = "/home/vinh/bin/jcode-elevenlabs-dictate"
 mode = "send"
-key = "off"
-timeout_secs = 90
+key = "f1"
+timeout_secs = 180
 
 [display]
 diff_mode = "inline"
 queue_mode = false
 auto_server_reload = true
 mouse_capture = true
-debug_socket = false
+debug_socket = true
 centered = false
 show_thinking = false
-diagram_mode = "none"
+diagram_mode = "margin"
 markdown_spacing = "compact"
 pin_images = true
-idle_animation = true
+idle_animation = false
 prompt_entry_animation = true
 disabled_animations = []
 diff_line_wrap = true
@@ -44,6 +54,10 @@ performance = ""
 animation_fps = 60
 redraw_fps = 60
 prompt_preview = true
+compact_notifications = false
+copy_badge_alt_label = ""
+show_agentgrep_output = false
+keybinding_hints = true
 
 [display.native_scrollbars]
 chat = true
@@ -53,6 +67,8 @@ side_panel = true
 memory = true
 swarm = true
 message_timestamps = true
+persist_memory_injections = false
+kv_cache_miss_notices = true
 update_channel = "stable"
 
 [websearch]
@@ -60,6 +76,17 @@ engine = "duckduckgo"
 fallback_engines = ["bing"]
 bing_api_key_env = "JCODE_BING_API_KEY"
 bing_market = "en-US"
+searxng_url_env = "JCODE_SEARXNG_URL"
+
+[tools]
+profile = ""
+enabled = []
+disabled = []
+disable_base_tools = false
+
+[acp]
+profile = "standard"
+tool_profile = "acp"
 
 [auth]
 trusted_external_sources = []
@@ -70,18 +97,34 @@ trusted_external_source_paths = [
 ]
 
 [provider]
-openai_reasoning_effort = "low"
+default_provider = "openai"
+default_model = "gpt-5.4"
+openai_reasoning_effort = "medium"
 openai_service_tier = "priority"
 openai_native_compaction_mode = "auto"
 openai_native_compaction_threshold_tokens = 200000
+preserve_reasoning_context = true
 cross_provider_failover = "countdown"
 same_provider_account_failover = true
+stream_idle_timeout_secs = 180
 
 [providers]
 
 [agents]
-swarm_spawn_mode = "visible"
+swarm_model = "gpt-5.4"
+swarm_spawn_mode = "inline"
 memory_sidecar_enabled = true
+memory_rerank_cadence = 3
+memory_rerank_votes = 2
+memory_rerank_min_agree = 2
+memory_embedding_backend = "local"
+subagent_timeout_secs = 600
+swarm_max_concurrent_agents = 32
+
+[terminal]
+
+[hooks]
+pre_tool_timeout_ms = 5000
 
 [ambient]
 enabled = false
@@ -104,9 +147,19 @@ telegram_enabled = false
 telegram_reply_enabled = false
 discord_enabled = false
 discord_reply_enabled = false
+jade_relay_enabled = false
+jade_relay_reply_enabled = false
+jade_relay_launch_enabled = false
+
+[notifications]
+turn_complete = true
+turn_complete_min_secs = 120
+turn_complete_todo_min_secs = 30
+turn_complete_only_when_unfocused = true
+turn_complete_sound = "Glass"
 
 [gateway]
-enabled = false
+enabled = true
 port = 7643
 bind_addr = "0.0.0.0"
 
@@ -122,11 +175,45 @@ topic_shift_threshold = 0.44999998807907104
 relevance_keep_threshold = 0.6499999761581421
 goal_window_turns = 5
 
+[power]
+prevent_sleep_while_streaming = true
+
 [autoreview]
 enabled = false
 
 [autojudge]
 enabled = false
 
-[skills]
-local_paths = ["./.agents/skills"]
+[launch_hotkeys]
+enabled = true
+imported = true
+
+[[launch_hotkeys.entries]]
+chord = "cmd+;"
+dir = "/home/vinh/tset/dairlib"
+label = "dairlib"
+self_dev = false
+
+[[launch_hotkeys.entries]]
+chord = "cmd+'"
+dir = "$HOME"
+label = "home"
+self_dev = false
+
+[[launch_hotkeys.entries]]
+chord = "cmd+["
+dir = "/home/vinh/jcode_interaction"
+label = "jcode_interaction"
+self_dev = false
+
+[[launch_hotkeys.entries]]
+chord = "cmd+]"
+dir = "/home/vinh/Desktop/v_note/obsidian_note"
+label = "obsidian_note"
+self_dev = false
+
+[[launch_hotkeys.entries]]
+chord = 'cmd+\'
+dir = "/home/vinh/tset/collect_data_ws"
+label = "collect_data_ws"
+self_dev = false
