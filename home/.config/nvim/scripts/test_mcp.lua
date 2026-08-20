@@ -1,40 +1,55 @@
--- Add ~/.config/nvim to runtime path so we can load config.mcp
 vim.opt.rtp:prepend(vim.fn.expand("~/.config/nvim"))
 
--- Create a new test buffer
 local bufnr = vim.api.nvim_create_buf(true, false)
+vim.api.nvim_set_current_buf(bufnr)
 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
   "function hello() {",
   "  print('hello')",
-  "}"
+  "}",
 })
 
--- Load and run the propose_edit function
 local mcp = require("config.mcp")
-mcp.propose_edit(bufnr, 1, 3, "function hello_world() {\n  print('hello world!')\n}")
+local ai = require("jcode_ai")
 
--- Fetch the updated buffer lines
-local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-local result = table.concat(lines, "\n")
+local preview = mcp.propose_edit(bufnr, 1, 3, "function hello_world() {\\n  print('hello world!')\\n}")
+local preview_status = ai.preview_status(bufnr)
+local after_preview = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
 
-local expected = [[<<<<<<< Current
-function hello() {
+local reject = mcp.reject_edit(bufnr)
+local after_reject = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+
+mcp.propose_edit(bufnr, 1, 3, "function hello_world() {\\n  print('hello world!')\\n}")
+local accept = mcp.accept_edit(bufnr)
+local after_accept = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+
+local expected_original = [[function hello() {
   print('hello')
-}
-=======
-function hello_world() {
+}]]
+
+local expected_applied = [[function hello_world() {
   print('hello world!')
-}
->>>>>>> Proposed]]
+}]]
 
 print("-------------------- TEST RESULT --------------------")
-print(result)
+print("preview.active", preview.active)
+print("preview_status.active", preview_status.active)
+print("reject.rejected", reject.rejected)
+print("accept.applied", accept.applied)
 print("-----------------------------------------------------")
 
-if result == expected then
-  print("SUCCESS: Conflict markers match expected output!")
+if preview.active
+  and preview_status.active
+  and reject.rejected
+  and accept.applied
+  and after_preview == expected_original
+  and after_reject == expected_original
+  and after_accept == expected_applied then
+  print("SUCCESS: Preview, reject, and accept behaviors match expected output!")
   vim.cmd("qall!")
 else
-  print("FAILURE: Output does not match expected!")
-  vim.cmd("cquit") -- exit with code 1
+  print("FAILURE: AI edit workflow did not match expected behavior!")
+  print("after_preview:\n" .. after_preview)
+  print("after_reject:\n" .. after_reject)
+  print("after_accept:\n" .. after_accept)
+  vim.cmd("cquit")
 end
