@@ -5,8 +5,14 @@ local ns = vim.api.nvim_create_namespace("jcode_ai_preview")
 M._setup_done = false
 M._state = {}
 
+local current_context
+
 local function state_dir()
   return vim.fn.stdpath("state") .. "/jcode_ai"
+end
+
+local function client_state_path()
+  return state_dir() .. "/client.json"
 end
 
 local function requests_dir()
@@ -34,7 +40,10 @@ local function write_json_file(path, data)
 end
 
 local function read_json_file(path)
-  local lines = vim.fn.readfile(path)
+  local ok_read, lines = pcall(vim.fn.readfile, path)
+  if not ok_read then
+    return nil
+  end
   if not lines or vim.tbl_isempty(lines) then
     return nil
   end
@@ -70,12 +79,170 @@ local function list_requests(status)
   return requests
 end
 
+local function load_client_state()
+  local state = read_json_file(client_state_path())
+  if type(state) ~= "table" then
+    return { session_id = "", model = "" }
+  end
+  state.session_id = tostring(state.session_id or "")
+  state.model = tostring(state.model or "")
+  return state
+end
+
+local function save_client_state(state)
+  ensure_dir(state_dir())
+  write_json_file(client_state_path(), {
+    session_id = tostring(state.session_id or ""),
+    model = tostring(state.model or ""),
+  })
+end
+
 local function emit_user_event(pattern, data)
   pcall(vim.api.nvim_exec_autocmds, "User", {
     pattern = pattern,
     data = data,
     modeline = false,
   })
+end
+
+local function parse_panel_output(output)
+  local session_id = nil
+  local chunks = {}
+  local final_text = nil
+  for line in tostring(output or ""):gmatch("[^\r\n]+") do
+    local ok, event = pcall(vim.json.decode, line)
+    if ok and type(event) == "table" then
+      local line_session = event.session_id or event.sessionId
+      if type(line_session) == "string" and line_session ~= "" then
+        session_id = line_session
+      end
+      local kind = tostring(event.type or event.kind or ""):lower()
+      local text = event.delta or event.text or event.content or event.message
+      if type(text) == "string" and text ~= "" then
+        if kind == "done" or kind == "assistant_final" then
+          final_text = text
+        elseif kind ~= "status" and kind ~= "progress" and kind ~= "tool" and kind ~= "session" then
+          table.insert(chunks, text)
+        end
+      end
+    end
+  end
+  local text = final_text or table.concat(chunks, "")
+  if text == "" then
+    text = tostring(output or "")
+  end
+  return {
+    session_id = session_id,
+    text = vim.trim(text),
+  }
+end
+
+local function build_context_prompt(prompt, opts)
+  opts = opts or {}
+  local ctx = current_context(opts.bufnr or 0, opts.start_line, opts.end_line)
+  local parts = {
+    "Context: nvim",
+    string.format("cwd: %s", ctx.cwd),
+    string.format("file: %s", ctx.file ~= "" and ctx.file or "[No Name]"),
+    string.format("cursor: %d:%d", ctx.cursor.line, ctx.cursor.col + 1),
+  }
+  if ctx.start_line and ctx.end_line then
+    table.insert(parts, string.format("range: %d-%d", ctx.start_line, ctx.end_line))
+  end
+  if ctx.selection and ctx.selection ~= "" then
+    table.insert(parts, "selection:\n```\n" .. ctx.selection .. "\n```")
+  end
+  if opts.mode == "edit" then
+    table.insert(parts, "Task: return ONLY the replacement text for exactly the selected range. No markdown fences. No explanation.")
+  else
+    table.insert(parts, "Task: answer the user briefly and helpfully using the current Neovim context.")
+  end
+  table.insert(parts, "User prompt:\n" .. prompt)
+  return table.concat(parts, "\n\n")
+end
+
+function M.send_prompt_sync(prompt, opts)
+  opts = opts or {}
+  local client = load_client_state()
+  local full_prompt = build_context_prompt(prompt, opts)
+  local cmd = { "jcode" }
+  if client.model ~= "" then
+    table.insert(cmd, "-m")
+    table.insert(cmd, client.model)
+  end
+  table.insert(cmd, "run")
+  table.insert(cmd, "--ndjson")
+  if client.session_id ~= "" then
+    table.insert(cmd, "--resume")
+    table.insert(cmd, client.session_id)
+  end
+  table.insert(cmd, full_prompt)
+
+  local result = vim.system(cmd, { text = true }):wait()
+  local parsed = parse_panel_output(result.stdout)
+  if parsed.session_id and parsed.session_id ~= "" then
+    client.session_id = parsed.session_id
+    save_client_state(client)
+  end
+  return {
+    code = result.code,
+    signal = result.signal,
+    session_id = client.session_id ~= "" and client.session_id or parsed.session_id,
+    text = parsed.text,
+    stderr = result.stderr,
+    ok = result.code == 0,
+  }
+end
+
+local function show_response_window(title, text)
+  local buf = vim.api.nvim_create_buf(false, true)
+  local lines = vim.split(text == "" and "[empty response]" or text, "\n", { plain = true })
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].filetype = "markdown"
+  local width = math.min(math.max(60, math.floor(vim.o.columns * 0.6)), vim.o.columns - 4)
+  local height = math.min(math.max(8, #lines + 2), vim.o.lines - 4)
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - width) / 2)
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    row = row,
+    col = col,
+    width = width,
+    height = height,
+    border = "rounded",
+    style = "minimal",
+    title = title,
+    title_pos = "center",
+  })
+  vim.keymap.set("n", "q", function()
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+  end, { buffer = buf, nowait = true, silent = true })
+end
+
+function M.ask_agent_edit(prompt, opts)
+  local result = M.send_prompt_sync(prompt, vim.tbl_extend("force", opts or {}, { mode = "edit" }))
+  if not result.ok then
+    return result, result.stderr ~= "" and result.stderr or result.text
+  end
+  local edit_text = result.text
+  if edit_text == "" then
+    return result, "empty_response"
+  end
+  M.preview_edit((opts or {}).bufnr or 0, opts.start_line, opts.end_line, edit_text)
+  return result
+end
+
+function M.ask_agent(prompt, opts)
+  local result = M.send_prompt_sync(prompt, vim.tbl_extend("force", opts or {}, { mode = "ask" }))
+  if result.ok then
+    show_response_window("Jcode Quick Ask", result.text)
+  else
+    show_response_window("Jcode Quick Ask Error", result.stderr ~= "" and result.stderr or result.text)
+  end
+  return result
 end
 
 local function current_buf(bufnr)
@@ -236,7 +403,7 @@ function M.preview_status(bufnr)
   }
 end
 
-local function current_context(bufnr, start_line, end_line)
+current_context = function(bufnr, start_line, end_line)
   bufnr = current_buf(bufnr)
   local name = vim.api.nvim_buf_get_name(bufnr)
   local cursor = vim.api.nvim_win_get_cursor(0)
@@ -330,6 +497,69 @@ local function prompt_request(start_line, end_line)
   end)
 end
 
+local function prompt_agent_edit(start_line, end_line)
+  vim.ui.input({
+    prompt = "Ask AI edit: ",
+  }, function(input)
+    if not input or input == "" then
+      return
+    end
+    local result, err = M.ask_agent_edit(input, {
+      bufnr = 0,
+      start_line = start_line,
+      end_line = end_line,
+    })
+    if err then
+      vim.notify("AI edit failed: " .. err, vim.log.levels.ERROR)
+    elseif result and result.session_id then
+      vim.notify("AI preview ready from session " .. result.session_id, vim.log.levels.INFO)
+    end
+  end)
+end
+
+function M.prompt_current_line_agent_edit()
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  prompt_agent_edit(line, line)
+end
+
+function M.prompt_visual_agent_edit()
+  local start_line = vim.fn.line("v")
+  local end_line = vim.fn.line(".")
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+  prompt_agent_edit(start_line, end_line)
+end
+
+local function prompt_agent_ask(start_line, end_line)
+  vim.ui.input({
+    prompt = "Quick ask Jcode: ",
+  }, function(input)
+    if not input or input == "" then
+      return
+    end
+    M.ask_agent(input, {
+      bufnr = 0,
+      start_line = start_line,
+      end_line = end_line,
+    })
+  end)
+end
+
+function M.prompt_current_line_agent_ask()
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  prompt_agent_ask(line, line)
+end
+
+function M.prompt_visual_agent_ask()
+  local start_line = vim.fn.line("v")
+  local end_line = vim.fn.line(".")
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+  prompt_agent_ask(start_line, end_line)
+end
+
 function M.prompt_current_line_request()
   local line = vim.api.nvim_win_get_cursor(0)[1]
   prompt_request(line, line)
@@ -419,16 +649,28 @@ local function create_commands()
     })
     print(request.id)
   end, { nargs = "+", range = true, desc = "Queue a request from Neovim to the coding agent" })
+
+  vim.api.nvim_create_user_command("AIQuickAsk", function(cmd)
+    local prompt = table.concat(cmd.fargs, " ")
+    if prompt == "" then
+      error("Usage: :AIQuickAsk {prompt}")
+    end
+    M.ask_agent(prompt, {
+      bufnr = 0,
+      start_line = cmd.range > 0 and cmd.line1 or nil,
+      end_line = cmd.range > 0 and cmd.line2 or nil,
+    })
+  end, { nargs = "+", range = true, desc = "Send a quick ask directly to Jcode with current Neovim context" })
 end
 
 local function create_keymaps()
   vim.keymap.set("n", "<leader>ap", function()
-    M.prompt_current_line_preview()
-  end, { desc = "AI Preview Edit" })
+    M.prompt_current_line_agent_edit()
+  end, { desc = "AI Prompt Edit" })
 
   vim.keymap.set("x", "<leader>ap", function()
-    M.prompt_visual_preview()
-  end, { desc = "AI Preview Edit" })
+    M.prompt_visual_agent_edit()
+  end, { desc = "AI Prompt Edit" })
 
   vim.keymap.set("n", "<leader>aa", function()
     M.accept_edit(0)
@@ -439,12 +681,12 @@ local function create_keymaps()
   end, { desc = "AI Reject Edit" })
 
   vim.keymap.set("n", "<leader>aq", function()
-    M.prompt_current_line_request()
-  end, { desc = "AI Queue Request" })
+    M.prompt_current_line_agent_ask()
+  end, { desc = "AI Quick Ask" })
 
   vim.keymap.set("x", "<leader>aq", function()
-    M.prompt_visual_request()
-  end, { desc = "AI Queue Request" })
+    M.prompt_visual_agent_ask()
+  end, { desc = "AI Quick Ask" })
 end
 
 local function mcp_success(data)
