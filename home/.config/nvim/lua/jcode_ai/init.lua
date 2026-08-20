@@ -153,12 +153,85 @@ local function build_context_prompt(prompt, opts)
     table.insert(parts, "selection:\n```\n" .. ctx.selection .. "\n```")
   end
   if opts.mode == "edit" then
-    table.insert(parts, "Task: return ONLY the replacement text for exactly the selected range. No markdown fences. No explanation.")
+    table.insert(parts, table.concat({
+      "Task: return valid JSON only for an edit proposal.",
+      "Use exactly this schema:",
+      '{"kind":"edit_batch","summary":"short summary","edits":[{"file":"absolute path or empty","start_line":1,"end_line":1,"replacement":"text"}]}',
+      "Rules:",
+      "- No markdown fences.",
+      "- No explanation outside JSON.",
+      "- Return exactly one edit for the selected range in the current file.",
+      "- replacement must contain the full replacement text for the selected range.",
+    }, "\n"))
   else
     table.insert(parts, "Task: answer the user briefly and helpfully using the current Neovim context.")
   end
   table.insert(parts, "User prompt:\n" .. prompt)
   return table.concat(parts, "\n\n")
+end
+
+local function strip_code_fences(text)
+  local trimmed = vim.trim(text or "")
+  local fenced = trimmed:match("^```[%w_-]*\n([%s%S]*)\n```$")
+  return fenced and vim.trim(fenced) or trimmed
+end
+
+local function normalize_edit_entry(edit, opts)
+  opts = opts or {}
+  if type(edit) ~= "table" then
+    return nil, "invalid_edit_entry"
+  end
+  local file = tostring(edit.file or edit.path or "")
+  local start_line = tonumber(edit.start_line or edit.line_start or edit.start)
+  local end_line = tonumber(edit.end_line or edit.line_end or edit["end"])
+  local replacement = edit.replacement or edit.proposed_text or edit.text
+  if type(replacement) ~= "string" or replacement == "" then
+    return nil, "missing_replacement"
+  end
+  if not start_line or not end_line then
+    return nil, "missing_range"
+  end
+  local current_file = current_context((opts.bufnr or 0), opts.start_line, opts.end_line).file
+  if file ~= "" and current_file ~= "" and vim.fs.normalize(file) ~= vim.fs.normalize(current_file) then
+    return nil, "edit_targets_other_file"
+  end
+  return {
+    file = file,
+    start_line = start_line,
+    end_line = end_line,
+    replacement = replacement,
+  }
+end
+
+function M.parse_edit_response(text, opts)
+  local body = strip_code_fences(text)
+  local ok, decoded = pcall(vim.json.decode, body)
+  if not ok or type(decoded) ~= "table" then
+    return nil, "invalid_json"
+  end
+
+  if decoded.kind == "edit_batch" and type(decoded.edits) == "table" and #decoded.edits > 0 then
+    return normalize_edit_entry(decoded.edits[1], opts)
+  end
+
+  if decoded.kind == "edit_proposal" and type(decoded.edits) == "table" and #decoded.edits > 0 then
+    return normalize_edit_entry(decoded.edits[1], opts)
+  end
+
+  if decoded.replacement or decoded.proposed_text then
+    return normalize_edit_entry(decoded, opts)
+  end
+
+  return nil, "unsupported_edit_schema"
+end
+
+function M.preview_edit_response(text, opts)
+  local edit, err = M.parse_edit_response(text, opts)
+  if not edit then
+    return nil, err
+  end
+  M.preview_edit((opts or {}).bufnr or 0, edit.start_line, edit.end_line, edit.replacement)
+  return edit
 end
 
 function M.send_prompt_sync(prompt, opts)
@@ -227,11 +300,13 @@ function M.ask_agent_edit(prompt, opts)
   if not result.ok then
     return result, result.stderr ~= "" and result.stderr or result.text
   end
-  local edit_text = result.text
-  if edit_text == "" then
+  if result.text == "" then
     return result, "empty_response"
   end
-  M.preview_edit((opts or {}).bufnr or 0, opts.start_line, opts.end_line, edit_text)
+  local _, err = M.preview_edit_response(result.text, opts)
+  if err then
+    return result, err
+  end
   return result
 end
 

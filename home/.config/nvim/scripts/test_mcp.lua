@@ -54,6 +54,33 @@ local request_preview_active = ai.preview_status(bufnr).active
 local request_accept = ai.accept_edit(bufnr)
 local after_request_accept = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
 
+local parsed_edit, parse_err = ai.parse_edit_response(vim.json.encode({
+  kind = "edit_batch",
+  summary = "rename hello function",
+  edits = {
+    {
+      start_line = 1,
+      end_line = 3,
+      replacement = "function structured_world() {\\n  print('json world!')\\n}",
+    },
+  },
+}), { bufnr = bufnr, start_line = 1, end_line = 3 })
+
+local previewed_edit, preview_err = ai.preview_edit_response(vim.json.encode({
+  kind = "edit_batch",
+  summary = "structured preview",
+  edits = {
+    {
+      start_line = 1,
+      end_line = 3,
+      replacement = "function structured_world() {\\n  print('json world!')\\n}",
+    },
+  },
+}), { bufnr = bufnr, start_line = 1, end_line = 3 })
+local structured_preview_active = ai.preview_status(bufnr).active
+local structured_accept = ai.accept_edit(bufnr)
+local after_structured_accept = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+
 local expected_original = [[function hello() {
   print('hello')
 }]]
@@ -66,6 +93,10 @@ local expected_request_applied = [[function animal_world() {
   print('tiger world!')
 }]]
 
+local expected_structured_applied = [[function structured_world() {
+  print('json world!')
+}]]
+
 print("-------------------- TEST RESULT --------------------")
 print("preview.active", preview.active)
 print("preview_status.active", preview_status.active)
@@ -75,6 +106,9 @@ print("request.taken", taken and taken.status)
 print("request.responded", responded and responded.status)
 print("request.preview_active", request_preview_active)
 print("request.accept.applied", request_accept.applied)
+print("structured.parse.ok", parsed_edit ~= nil and parse_err == nil)
+print("structured.preview.ok", previewed_edit ~= nil and preview_err == nil)
+print("structured.accept.applied", structured_accept.applied)
 print("-----------------------------------------------------")
 
 if preview.active
@@ -85,6 +119,12 @@ if preview.active
   and responded and responded.status == "answered"
   and request_preview_active
   and request_accept.applied
+  and parsed_edit ~= nil
+  and parse_err == nil
+  and previewed_edit ~= nil
+  and preview_err == nil
+  and structured_preview_active
+  and structured_accept.applied
   and after_preview == expected_original
   and after_reject == expected_original
   and after_accept == expected_applied then
@@ -103,8 +143,12 @@ if preview.active
     print("FAILURE: Expected lifecycle User events were not all observed!")
     print(vim.inspect(events))
     vim.cmd("cquit")
+  elseif after_structured_accept ~= expected_structured_applied then
+    print("FAILURE: Structured edit protocol did not apply expected output!")
+    print("after_structured_accept:\n" .. after_structured_accept)
+    vim.cmd("cquit")
   else
-    print("SUCCESS: Preview, request bridge, and lifecycle events match expected output!")
+    print("SUCCESS: Preview, structured edit protocol, request bridge, and lifecycle events match expected output!")
     vim.cmd("qall!")
   end
 else
