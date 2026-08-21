@@ -1,6 +1,7 @@
 local M = {}
 
 local ns = vim.api.nvim_create_namespace("jcode_ai_preview")
+local ui_ns = vim.api.nvim_create_namespace("jcode_ai_inline_ui")
 
 M._setup_done = false
 M._state = {}
@@ -228,28 +229,36 @@ local function open_inline_input(title, placeholder, on_submit)
     winhl = "NormalFloat:Pmenu,FloatBorder:FloatBorder",
   })
 
+  local function finish()
+    clear_inline_hint(0)
+    close_window(win)
+  end
+
   local function submit()
     local input = table.concat(vim.api.nvim_buf_get_lines(buf, 0, 1, false), "")
     input = vim.trim((input:gsub("^>%s*", "")))
-    close_window(win)
+    finish()
     if input ~= "" then
       on_submit(input)
     end
   end
 
-  set_close_keys(buf, win, function(close)
-    vim.keymap.set("i", "<Esc>", close, { buffer = buf, nowait = true, silent = true })
-    vim.keymap.set("i", "<CR>", function()
-      submit()
-    end, { buffer = buf, nowait = true, silent = true })
-    vim.keymap.set("n", "<CR>", function()
-      submit()
-    end, { buffer = buf, nowait = true, silent = true })
+  set_close_keys(buf, win, function()
+    local cancel = function()
+      finish()
+    end
+    vim.keymap.set("i", "<Esc>", cancel, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("i", "<CR>", submit, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("i", "<Tab>", submit, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<CR>", submit, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<Tab>", submit, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "q", cancel, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, nowait = true, silent = true })
   end)
 
   vim.api.nvim_win_set_cursor(win, { 1, 2 })
   vim.cmd("startinsert")
-  return { buf = buf, win = win, submit = submit, close = function() close_window(win) end }
+  return { buf = buf, win = win, submit = submit, close = finish }
 end
 
 local function open_inline_dropdown(title, items, on_pick)
@@ -277,22 +286,25 @@ local function open_inline_dropdown(title, items, on_pick)
     winhl = "NormalFloat:Pmenu,FloatBorder:FloatBorder,CursorLine:PmenuSel",
   })
 
+  local function finish()
+    clear_inline_hint(0)
+    close_window(win)
+  end
+
   local function pick(index)
     local item = items[index]
-    close_window(win)
+    finish()
     if item then
       on_pick(item)
     end
   end
 
-  set_close_keys(buf, win, function(close)
+  set_close_keys(buf, win, function()
     vim.keymap.set("n", "<CR>", function()
       pick(vim.api.nvim_win_get_cursor(win)[1])
     end, { buffer = buf, nowait = true, silent = true })
     vim.keymap.set("n", "<Tab>", function()
-      local line = vim.api.nvim_win_get_cursor(win)[1]
-      local next_line = line >= #items and 1 or (line + 1)
-      vim.api.nvim_win_set_cursor(win, { next_line, 0 })
+      pick(vim.api.nvim_win_get_cursor(win)[1])
     end, { buffer = buf, nowait = true, silent = true })
     vim.keymap.set("n", "<S-Tab>", function()
       local line = vim.api.nvim_win_get_cursor(win)[1]
@@ -309,6 +321,19 @@ local function open_inline_dropdown(title, items, on_pick)
       local prev_line = line <= 1 and 1 or (line - 1)
       vim.api.nvim_win_set_cursor(win, { prev_line, 0 })
     end, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<Right>", function()
+      pick(vim.api.nvim_win_get_cursor(win)[1])
+    end, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<C-n>", function()
+      local line = vim.api.nvim_win_get_cursor(win)[1]
+      local next_line = line >= #items and #items or (line + 1)
+      vim.api.nvim_win_set_cursor(win, { next_line, 0 })
+    end, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<C-p>", function()
+      local line = vim.api.nvim_win_get_cursor(win)[1]
+      local prev_line = line <= 1 and 1 or (line - 1)
+      vim.api.nvim_win_set_cursor(win, { prev_line, 0 })
+    end, { buffer = buf, nowait = true, silent = true })
     for i = 1, math.min(#items, 9) do
       vim.keymap.set("n", tostring(i), function()
         pick(i)
@@ -319,7 +344,7 @@ local function open_inline_dropdown(title, items, on_pick)
   end)
 
   vim.api.nvim_win_set_cursor(win, { 1, 0 })
-  return { buf = buf, win = win, pick = pick, close = function() close_window(win) end }
+  return { buf = buf, win = win, pick = pick, close = finish }
 end
 
 local function preset_items(mode)
@@ -549,6 +574,21 @@ local function current_buf(bufnr)
     return vim.api.nvim_get_current_buf()
   end
   return bufnr
+end
+
+local function clear_inline_hint(bufnr)
+  pcall(vim.api.nvim_buf_clear_namespace, current_buf(bufnr), ui_ns, 0, -1)
+end
+
+local function show_inline_hint(bufnr, line, chunks)
+  bufnr = current_buf(bufnr)
+  clear_inline_hint(bufnr)
+  vim.api.nvim_buf_set_extmark(bufnr, ui_ns, math.max((line or 1) - 1, 0), 0, {
+    virt_text = chunks,
+    virt_text_pos = "eol",
+    hl_mode = "combine",
+    priority = 120,
+  })
 end
 
 local function decode_text(text)
@@ -820,11 +860,23 @@ end
 
 local function open_prompt_picker(mode, start_line, end_line)
   local items = preset_items(mode)
+  local prompt_chunks = {
+    { " AI ", "Special" },
+    { items[2] and items[2].label or "Prompt", "Comment" },
+    { "  ·  Tab accept  ·  1-9 choose", "Comment" },
+  }
+  show_inline_hint(0, start_line, prompt_chunks)
   return open_inline_dropdown(mode == "edit" and "AI Edit" or "Quick Ask", items, function(item)
     if item.prompt then
       run_prompt_action(mode, item.prompt, start_line, end_line)
       return
     end
+
+    show_inline_hint(0, start_line, {
+      { " AI prompt > ", "Special" },
+      { mode == "edit" and "describe the change" or "ask about this code", "Comment" },
+      { "  ·  Tab submit", "Comment" },
+    })
 
     open_inline_input(
       mode == "edit" and "Ask AI edit" or "Quick ask Jcode",
@@ -1145,6 +1197,9 @@ M._test = {
   open_inline_input = open_inline_input,
   open_prompt_picker = open_prompt_picker,
   run_prompt_action = run_prompt_action,
+  show_inline_hint = show_inline_hint,
+  clear_inline_hint = clear_inline_hint,
+  ui_ns = ui_ns,
 }
 
 return M
