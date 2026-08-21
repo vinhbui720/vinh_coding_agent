@@ -154,6 +154,196 @@ local function run_jcode_command(cmd)
   return result, parsed
 end
 
+local function close_window(win)
+  if win and vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_win_close(win, true)
+  end
+end
+
+local function cursor_anchor()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  return {
+    row = cursor[1],
+    col = cursor[2],
+  }
+end
+
+local function open_cursor_float(buf, opts)
+  opts = opts or {}
+  local anchor = cursor_anchor()
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "win",
+    win = vim.api.nvim_get_current_win(),
+    row = math.max(anchor.row, 1),
+    col = anchor.col,
+    width = opts.width,
+    height = opts.height,
+    border = opts.border or "rounded",
+    style = "minimal",
+    title = opts.title,
+    title_pos = opts.title_pos or "left",
+    noautocmd = true,
+    zindex = opts.zindex or 180,
+  })
+  if opts.winhl then
+    vim.wo[win].winhl = opts.winhl
+  end
+  if opts.cursorline then
+    vim.wo[win].cursorline = true
+  end
+  return win
+end
+
+local function set_close_keys(buf, win, extra)
+  local function close()
+    close_window(win)
+  end
+  vim.keymap.set("n", "q", close, { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, silent = true })
+  if extra then
+    extra(close)
+  end
+end
+
+local function open_inline_input(title, placeholder, on_submit)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].swapfile = false
+
+  local display = placeholder ~= "" and placeholder or "Type prompt and press Enter"
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "> " })
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+    virt_text = { { display, "Comment" } },
+    virt_text_pos = "overlay",
+    hl_mode = "combine",
+    virt_text_win_col = 2,
+  })
+
+  local width = math.min(math.max(36, #title + 12), math.max(vim.o.columns - 8, 20))
+  local win = open_cursor_float(buf, {
+    width = width,
+    height = 1,
+    title = title,
+    winhl = "NormalFloat:Pmenu,FloatBorder:FloatBorder",
+  })
+
+  local function submit()
+    local input = table.concat(vim.api.nvim_buf_get_lines(buf, 0, 1, false), "")
+    input = vim.trim((input:gsub("^>%s*", "")))
+    close_window(win)
+    if input ~= "" then
+      on_submit(input)
+    end
+  end
+
+  set_close_keys(buf, win, function(close)
+    vim.keymap.set("i", "<Esc>", close, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("i", "<CR>", function()
+      submit()
+    end, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<CR>", function()
+      submit()
+    end, { buffer = buf, nowait = true, silent = true })
+  end)
+
+  vim.api.nvim_win_set_cursor(win, { 1, 2 })
+  vim.cmd("startinsert")
+  return { buf = buf, win = win, submit = submit, close = function() close_window(win) end }
+end
+
+local function open_inline_dropdown(title, items, on_pick)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].modifiable = true
+
+  local lines = {}
+  local max_width = #title
+  for i, item in ipairs(items) do
+    local label = string.format("  %s", item.label)
+    max_width = math.max(max_width, #label)
+    table.insert(lines, label)
+  end
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+
+  local win = open_cursor_float(buf, {
+    width = math.min(max_width + 2, math.max(vim.o.columns - 8, 20)),
+    height = #lines,
+    title = title,
+    cursorline = true,
+    winhl = "NormalFloat:Pmenu,FloatBorder:FloatBorder,CursorLine:PmenuSel",
+  })
+
+  local function pick(index)
+    local item = items[index]
+    close_window(win)
+    if item then
+      on_pick(item)
+    end
+  end
+
+  set_close_keys(buf, win, function(close)
+    vim.keymap.set("n", "<CR>", function()
+      pick(vim.api.nvim_win_get_cursor(win)[1])
+    end, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<Tab>", function()
+      local line = vim.api.nvim_win_get_cursor(win)[1]
+      local next_line = line >= #items and 1 or (line + 1)
+      vim.api.nvim_win_set_cursor(win, { next_line, 0 })
+    end, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<S-Tab>", function()
+      local line = vim.api.nvim_win_get_cursor(win)[1]
+      local prev_line = line <= 1 and #items or (line - 1)
+      vim.api.nvim_win_set_cursor(win, { prev_line, 0 })
+    end, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<Down>", function()
+      local line = vim.api.nvim_win_get_cursor(win)[1]
+      local next_line = line >= #items and #items or (line + 1)
+      vim.api.nvim_win_set_cursor(win, { next_line, 0 })
+    end, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<Up>", function()
+      local line = vim.api.nvim_win_get_cursor(win)[1]
+      local prev_line = line <= 1 and 1 or (line - 1)
+      vim.api.nvim_win_set_cursor(win, { prev_line, 0 })
+    end, { buffer = buf, nowait = true, silent = true })
+    for i = 1, math.min(#items, 9) do
+      vim.keymap.set("n", tostring(i), function()
+        pick(i)
+      end, { buffer = buf, nowait = true, silent = true })
+    end
+    vim.keymap.set("n", "j", "j", { buffer = buf, nowait = true, silent = true, remap = true })
+    vim.keymap.set("n", "k", "k", { buffer = buf, nowait = true, silent = true, remap = true })
+  end)
+
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  return { buf = buf, win = win, pick = pick, close = function() close_window(win) end }
+end
+
+local function preset_items(mode)
+  if mode == "edit" then
+    return {
+      { label = "Custom prompt…", prompt = nil },
+      { label = "Fix the code", prompt = "Fix the code on this line or selection." },
+      { label = "Refactor it", prompt = "Refactor this code to be cleaner and easier to maintain." },
+      { label = "Improve naming", prompt = "Improve names and readability without changing behavior." },
+      { label = "Add comments", prompt = "Add concise helpful comments only where they add clarity." },
+      { label = "Make it concise", prompt = "Make this code more concise while keeping the same behavior." },
+    }
+  end
+
+  return {
+    { label = "Custom prompt…", prompt = nil },
+    { label = "Explain this", prompt = "Explain what this line or selection is doing." },
+    { label = "Find bugs", prompt = "Look for likely bugs or edge cases in this line or selection." },
+    { label = "Suggest improvements", prompt = "Suggest practical improvements for this line or selection." },
+    { label = "Summarize", prompt = "Summarize this line or selection briefly." },
+    { label = "Add tests ideas", prompt = "Suggest useful test cases for this line or selection." },
+  }
+end
+
 local function build_context_prompt(prompt, opts)
   opts = opts or {}
   local ctx = current_context(opts.bufnr or 0, opts.start_line, opts.end_line)
@@ -606,13 +796,8 @@ local function prompt_request(start_line, end_line)
   end)
 end
 
-local function prompt_agent_edit(start_line, end_line)
-  vim.ui.input({
-    prompt = "Ask AI edit: ",
-  }, function(input)
-    if not input or input == "" then
-      return
-    end
+local function run_prompt_action(mode, input, start_line, end_line)
+  if mode == "edit" then
     local result, err = M.ask_agent_edit(input, {
       bufnr = 0,
       start_line = start_line,
@@ -623,7 +808,36 @@ local function prompt_agent_edit(start_line, end_line)
     elseif result and result.session_id then
       vim.notify("AI preview ready from session " .. result.session_id, vim.log.levels.INFO)
     end
+    return
+  end
+
+  M.ask_agent(input, {
+    bufnr = 0,
+    start_line = start_line,
+    end_line = end_line,
+  })
+end
+
+local function open_prompt_picker(mode, start_line, end_line)
+  local items = preset_items(mode)
+  return open_inline_dropdown(mode == "edit" and "AI Edit" or "Quick Ask", items, function(item)
+    if item.prompt then
+      run_prompt_action(mode, item.prompt, start_line, end_line)
+      return
+    end
+
+    open_inline_input(
+      mode == "edit" and "Ask AI edit" or "Quick ask Jcode",
+      mode == "edit" and "Describe the change you want" or "Ask about this line or selection",
+      function(input)
+        run_prompt_action(mode, input, start_line, end_line)
+      end
+    )
   end)
+end
+
+local function prompt_agent_edit(start_line, end_line)
+  open_prompt_picker("edit", start_line, end_line)
 end
 
 function M.prompt_current_line_agent_edit()
@@ -641,18 +855,7 @@ function M.prompt_visual_agent_edit()
 end
 
 local function prompt_agent_ask(start_line, end_line)
-  vim.ui.input({
-    prompt = "Quick ask Jcode: ",
-  }, function(input)
-    if not input or input == "" then
-      return
-    end
-    M.ask_agent(input, {
-      bufnr = 0,
-      start_line = start_line,
-      end_line = end_line,
-    })
-  end)
+  open_prompt_picker("ask", start_line, end_line)
 end
 
 function M.prompt_current_line_agent_ask()
@@ -935,5 +1138,13 @@ function M.setup()
   create_commands()
   create_keymaps()
 end
+
+M._test = {
+  preset_items = preset_items,
+  open_inline_dropdown = open_inline_dropdown,
+  open_inline_input = open_inline_input,
+  open_prompt_picker = open_prompt_picker,
+  run_prompt_action = run_prompt_action,
+}
 
 return M
