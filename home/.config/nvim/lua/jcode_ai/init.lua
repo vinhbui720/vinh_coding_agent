@@ -137,6 +137,23 @@ local function parse_panel_output(output)
   }
 end
 
+local function looks_like_resume_session_error(text)
+  local lower = string.lower(tostring(text or ""))
+  return lower:find("session", 1, true) ~= nil and (
+    lower:find("not found", 1, true) ~= nil
+    or lower:find("found match", 1, true) ~= nil
+    or lower:find("multiple", 1, true) ~= nil
+    or lower:find("ambiguous", 1, true) ~= nil
+    or lower:find("no session", 1, true) ~= nil
+  )
+end
+
+local function run_jcode_command(cmd)
+  local result = vim.system(cmd, { text = true }):wait()
+  local parsed = parse_panel_output(result.stdout)
+  return result, parsed
+end
+
 local function build_context_prompt(prompt, opts)
   opts = opts or {}
   local ctx = current_context(opts.bufnr or 0, opts.start_line, opts.end_line)
@@ -238,21 +255,33 @@ function M.send_prompt_sync(prompt, opts)
   opts = opts or {}
   local client = load_client_state()
   local full_prompt = build_context_prompt(prompt, opts)
-  local cmd = { "jcode" }
-  if client.model ~= "" then
-    table.insert(cmd, "-m")
-    table.insert(cmd, client.model)
+  local function build_cmd(session_id)
+    local cmd = { "jcode" }
+    if client.model ~= "" then
+      table.insert(cmd, "-m")
+      table.insert(cmd, client.model)
+    end
+    table.insert(cmd, "run")
+    table.insert(cmd, "--ndjson")
+    if session_id ~= "" then
+      table.insert(cmd, "--resume")
+      table.insert(cmd, session_id)
+    end
+    table.insert(cmd, full_prompt)
+    return cmd
   end
-  table.insert(cmd, "run")
-  table.insert(cmd, "--ndjson")
-  if client.session_id ~= "" then
-    table.insert(cmd, "--resume")
-    table.insert(cmd, client.session_id)
-  end
-  table.insert(cmd, full_prompt)
 
-  local result = vim.system(cmd, { text = true }):wait()
-  local parsed = parse_panel_output(result.stdout)
+  local used_resume = client.session_id ~= ""
+  local result, parsed = run_jcode_command(build_cmd(client.session_id))
+  if used_resume and result.code ~= 0 then
+    local error_text = table.concat({ result.stderr or "", parsed.text or "" }, "\n")
+    if looks_like_resume_session_error(error_text) then
+      client.session_id = ""
+      save_client_state(client)
+      result, parsed = run_jcode_command(build_cmd(""))
+    end
+  end
+
   if parsed.session_id and parsed.session_id ~= "" then
     client.session_id = parsed.session_id
     save_client_state(client)
@@ -289,6 +318,11 @@ local function show_response_window(title, text)
     title_pos = "center",
   })
   vim.keymap.set("n", "q", function()
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+  end, { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>", function()
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
     end
