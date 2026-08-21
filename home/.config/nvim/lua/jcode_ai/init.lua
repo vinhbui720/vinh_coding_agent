@@ -157,6 +157,13 @@ local function run_jcode_command(cmd)
   return result, parsed
 end
 
+local function run_jcode_command_async(cmd, on_exit)
+  vim.system(cmd, { text = true }, vim.schedule_wrap(function(result)
+    local parsed = parse_panel_output(result.stdout)
+    on_exit(result, parsed)
+  end))
+end
+
 local function close_window(win)
   if win and vim.api.nvim_win_is_valid(win) then
     vim.api.nvim_win_close(win, true)
@@ -213,15 +220,7 @@ local function open_inline_input(title, placeholder, on_submit)
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].swapfile = false
-
-  local display = placeholder ~= "" and placeholder or "Type prompt and press Enter"
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "> " })
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    virt_text = { { display, "Comment" } },
-    virt_text_pos = "overlay",
-    hl_mode = "combine",
-    virt_text_win_col = 2,
-  })
 
   local width = math.min(math.max(36, #title + 12), math.max(vim.o.columns - 8, 20))
   local win = open_cursor_float(buf, {
@@ -513,6 +512,58 @@ function M.send_prompt_sync(prompt, opts)
   }
 end
 
+function M.send_prompt_async(prompt, opts, callback)
+  opts = opts or {}
+  callback = callback or function() end
+  local client = load_client_state()
+  local full_prompt = build_context_prompt(prompt, opts)
+
+  local function build_cmd(session_id)
+    local cmd = { "jcode" }
+    if client.model ~= "" then
+      table.insert(cmd, "-m")
+      table.insert(cmd, client.model)
+    end
+    table.insert(cmd, "run")
+    table.insert(cmd, "--ndjson")
+    if session_id ~= "" then
+      table.insert(cmd, "--resume")
+      table.insert(cmd, session_id)
+    end
+    table.insert(cmd, full_prompt)
+    return cmd
+  end
+
+  local function finish(result, parsed)
+    if parsed.session_id and parsed.session_id ~= "" then
+      client.session_id = parsed.session_id
+      save_client_state(client)
+    end
+    callback({
+      code = result.code,
+      signal = result.signal,
+      session_id = client.session_id ~= "" and client.session_id or parsed.session_id,
+      text = parsed.text,
+      stderr = result.stderr,
+      ok = result.code == 0,
+    })
+  end
+
+  local used_resume = client.session_id ~= ""
+  run_jcode_command_async(build_cmd(client.session_id), function(result, parsed)
+    if used_resume and result.code ~= 0 then
+      local error_text = table.concat({ result.stderr or "", parsed.text or "" }, "\n")
+      if looks_like_resume_session_error(error_text) then
+        client.session_id = ""
+        save_client_state(client)
+        run_jcode_command_async(build_cmd(""), finish)
+        return
+      end
+    end
+    finish(result, parsed)
+  end)
+end
+
 local function show_response_window(title, text)
   local buf = vim.api.nvim_create_buf(false, true)
   local lines = vim.split(text == "" and "[empty response]" or text, "\n", { plain = true })
@@ -561,6 +612,22 @@ function M.ask_agent_edit(prompt, opts)
   return result
 end
 
+function M.ask_agent_edit_async(prompt, opts, callback)
+  callback = callback or function() end
+  M.send_prompt_async(prompt, vim.tbl_extend("force", opts or {}, { mode = "edit" }), function(result)
+    local err = nil
+    if not result.ok then
+      err = result.stderr ~= "" and result.stderr or result.text
+    elseif result.text == "" then
+      err = "empty_response"
+    else
+      local _, preview_err = M.preview_edit_response(result.text, opts)
+      err = preview_err
+    end
+    callback(result, err)
+  end)
+end
+
 function M.ask_agent(prompt, opts)
   local result = M.send_prompt_sync(prompt, vim.tbl_extend("force", opts or {}, { mode = "ask" }))
   if result.ok then
@@ -569,6 +636,18 @@ function M.ask_agent(prompt, opts)
     show_response_window("Jcode Quick Ask Error", result.stderr ~= "" and result.stderr or result.text)
   end
   return result
+end
+
+function M.ask_agent_async(prompt, opts, callback)
+  callback = callback or function() end
+  M.send_prompt_async(prompt, vim.tbl_extend("force", opts or {}, { mode = "ask" }), function(result)
+    if result.ok then
+      show_response_window("Jcode Quick Ask", result.text)
+    else
+      show_response_window("Jcode Quick Ask Error", result.stderr ~= "" and result.stderr or result.text)
+    end
+    callback(result)
+  end)
 end
 
 local function current_buf(bufnr)
@@ -839,46 +918,35 @@ local function prompt_request(start_line, end_line)
 end
 
 local function run_prompt_action(mode, input, start_line, end_line)
-  if mode == "edit" then
-    local result, err = M.ask_agent_edit(input, {
-      bufnr = 0,
-      start_line = start_line,
-      end_line = end_line,
-    })
-    if err then
-      vim.notify("AI edit failed: " .. err, vim.log.levels.ERROR)
-    elseif result and result.session_id then
-      vim.notify("AI preview ready from session " .. result.session_id, vim.log.levels.INFO)
-    end
-    return
-  end
-
-  M.ask_agent(input, {
+  local request_opts = {
     bufnr = 0,
     start_line = start_line,
     end_line = end_line,
-  })
+  }
+
+  if mode == "edit" then
+    vim.notify("Jcode is preparing an edit preview...", vim.log.levels.INFO)
+    M.ask_agent_edit_async(input, request_opts, function(result, err)
+      if err then
+        vim.notify("AI edit failed: " .. err, vim.log.levels.ERROR)
+      elseif result and result.session_id then
+        vim.notify("AI preview ready from session " .. result.session_id, vim.log.levels.INFO)
+      end
+    end)
+    return
+  end
+
+  vim.notify("Jcode is thinking...", vim.log.levels.INFO)
+  M.ask_agent_async(input, request_opts)
 end
 
 local function open_prompt_picker(mode, start_line, end_line)
   local items = preset_items(mode)
-  local prompt_chunks = {
-    { " AI ", "Special" },
-    { items[2] and items[2].label or "Prompt", "Comment" },
-    { "  ·  Tab accept  ·  1-9 choose", "Comment" },
-  }
-  show_inline_hint(0, start_line, prompt_chunks)
   return open_inline_dropdown(mode == "edit" and "AI Edit" or "Quick Ask", items, function(item)
     if item.prompt then
       run_prompt_action(mode, item.prompt, start_line, end_line)
       return
     end
-
-    show_inline_hint(0, start_line, {
-      { " AI prompt > ", "Special" },
-      { mode == "edit" and "describe the change" or "ask about this code", "Comment" },
-      { "  ·  Tab submit", "Comment" },
-    })
 
     open_inline_input(
       mode == "edit" and "Ask AI edit" or "Quick ask Jcode",
@@ -1202,6 +1270,9 @@ M._test = {
   show_inline_hint = show_inline_hint,
   clear_inline_hint = clear_inline_hint,
   ui_ns = ui_ns,
+  send_prompt_async = M.send_prompt_async,
+  ask_agent_edit_async = M.ask_agent_edit_async,
+  ask_agent_async = M.ask_agent_async,
 }
 
 return M
