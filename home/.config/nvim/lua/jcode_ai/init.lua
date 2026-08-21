@@ -208,8 +208,16 @@ local function set_close_keys(buf, win, extra)
   local function close()
     close_window(win)
   end
+
+  vim.api.nvim_create_autocmd({ "BufLeave", "WinLeave" }, {
+    buffer = buf,
+    callback = close,
+    once = true,
+  })
+
   vim.keymap.set("n", "q", close, { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<C-c>", close, { buffer = buf, nowait = true, silent = true })
   if extra then
     extra(close)
   end
@@ -249,6 +257,7 @@ local function open_inline_input(title, placeholder, on_submit)
       finish()
     end
     vim.keymap.set("i", "<Esc>", cancel, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("i", "<C-c>", cancel, { buffer = buf, nowait = true, silent = true })
     vim.keymap.set("i", "<CR>", submit, { buffer = buf, nowait = true, silent = true })
     vim.keymap.set("i", "<Tab>", submit, { buffer = buf, nowait = true, silent = true })
     vim.keymap.set("n", "<CR>", submit, { buffer = buf, nowait = true, silent = true })
