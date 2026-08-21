@@ -7,6 +7,8 @@ M._setup_done = false
 M._state = {}
 
 local current_context
+local clear_inline_hint
+local show_inline_hint
 
 local function state_dir()
   return vim.fn.stdpath("state") .. "/jcode_ai"
@@ -576,11 +578,11 @@ local function current_buf(bufnr)
   return bufnr
 end
 
-local function clear_inline_hint(bufnr)
+clear_inline_hint = function(bufnr)
   pcall(vim.api.nvim_buf_clear_namespace, current_buf(bufnr), ui_ns, 0, -1)
 end
 
-local function show_inline_hint(bufnr, line, chunks)
+show_inline_hint = function(bufnr, line, chunks)
   bufnr = current_buf(bufnr)
   clear_inline_hint(bufnr)
   vim.api.nvim_buf_set_extmark(bufnr, ui_ns, math.max((line or 1) - 1, 0), 0, {
