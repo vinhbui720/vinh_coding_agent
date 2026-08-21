@@ -5,6 +5,7 @@ local ui_ns = vim.api.nvim_create_namespace("jcode_ai_inline_ui")
 
 M._setup_done = false
 M._state = {}
+M._active_popup = nil
 
 local current_context
 local clear_inline_hint
@@ -170,6 +171,26 @@ local function close_window(win)
   end
 end
 
+local function close_active_popup()
+  local popup = M._active_popup
+  if not popup then
+    return
+  end
+  M._active_popup = nil
+  if popup.on_close then
+    pcall(popup.on_close)
+  end
+  close_window(popup.win)
+end
+
+local function register_active_popup(win, on_close)
+  close_active_popup()
+  M._active_popup = {
+    win = win,
+    on_close = on_close,
+  }
+end
+
 local function cursor_anchor()
   local cursor = vim.api.nvim_win_get_cursor(0)
   return {
@@ -206,10 +227,14 @@ end
 
 local function set_close_keys(buf, win, extra)
   local function close()
+    if M._active_popup and M._active_popup.win == win then
+      close_active_popup()
+      return
+    end
     close_window(win)
   end
 
-  vim.api.nvim_create_autocmd({ "BufLeave", "WinLeave" }, {
+  vim.api.nvim_create_autocmd({ "BufLeave", "WinLeave", "FocusLost" }, {
     buffer = buf,
     callback = close,
     once = true,
@@ -218,6 +243,7 @@ local function set_close_keys(buf, win, extra)
   vim.keymap.set("n", "q", close, { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<C-c>", close, { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Left>", close, { buffer = buf, nowait = true, silent = true })
   if extra then
     extra(close)
   end
@@ -237,10 +263,12 @@ local function open_inline_input(title, placeholder, on_submit)
     title = title,
     winhl = "NormalFloat:Pmenu,FloatBorder:FloatBorder",
   })
+  register_active_popup(win, function()
+    clear_inline_hint(0)
+  end)
 
   local function finish()
-    clear_inline_hint(0)
-    close_window(win)
+    close_active_popup()
   end
 
   local function submit()
@@ -295,10 +323,12 @@ local function open_inline_dropdown(title, items, on_pick)
     cursorline = true,
     winhl = "NormalFloat:Pmenu,FloatBorder:FloatBorder,CursorLine:PmenuSel",
   })
+  register_active_popup(win, function()
+    clear_inline_hint(0)
+  end)
 
   local function finish()
-    clear_inline_hint(0)
-    close_window(win)
+    close_active_popup()
   end
 
   local function pick(index)
@@ -574,6 +604,7 @@ function M.send_prompt_async(prompt, opts, callback)
 end
 
 local function show_response_window(title, text)
+  close_active_popup()
   local buf = vim.api.nvim_create_buf(false, true)
   local lines = vim.split(text == "" and "[empty response]" or text, "\n", { plain = true })
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
@@ -594,16 +625,12 @@ local function show_response_window(title, text)
     title = title,
     title_pos = "center",
   })
-  vim.keymap.set("n", "q", function()
-    if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_close(win, true)
-    end
-  end, { buffer = buf, nowait = true, silent = true })
-  vim.keymap.set("n", "<Esc>", function()
-    if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_close(win, true)
-    end
-  end, { buffer = buf, nowait = true, silent = true })
+  register_active_popup(win, nil)
+  set_close_keys(buf, win, function(close)
+    vim.keymap.set("n", "<CR>", close, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<Left>", close, { buffer = buf, nowait = true, silent = true })
+  end)
+  return { buf = buf, win = win, close = close_active_popup }
 end
 
 function M.ask_agent_edit(prompt, opts)
@@ -1282,6 +1309,8 @@ M._test = {
   send_prompt_async = M.send_prompt_async,
   ask_agent_edit_async = M.ask_agent_edit_async,
   ask_agent_async = M.ask_agent_async,
+  close_active_popup = close_active_popup,
+  show_response_window = show_response_window,
 }
 
 return M

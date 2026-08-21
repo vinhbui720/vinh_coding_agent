@@ -23,9 +23,13 @@ vim.api.nvim_win_set_cursor(0, { 1, 0 })
 local picker = t.open_inline_dropdown("AI Edit", t.preset_items("edit"), function() end)
 local picker_maps = vim.api.nvim_buf_get_keymap(picker.buf, "n")
 local has_ctrl_c = false
+local has_left = false
 for _, map in ipairs(picker_maps) do
-  if string.lower(map.lhs) == "<c-c>" then
+  local lhs = string.lower(map.lhs)
+  if lhs == "<c-c>" then
     has_ctrl_c = true
+  elseif lhs == "<left>" then
+    has_left = true
   end
 end
 local other = vim.api.nvim_create_buf(false, true)
@@ -34,6 +38,18 @@ vim.bo[other].bufhidden = "wipe"
 vim.bo[other].swapfile = false
 vim.api.nvim_set_current_buf(other)
 vim.wait(50, function() return not vim.api.nvim_win_is_valid(picker.win) end, 10)
+
+local response = t.show_response_window("Jcode Quick Ask", "hello")
+local response_maps = vim.api.nvim_buf_get_keymap(response.buf, "n")
+local has_response_left = false
+for _, map in ipairs(response_maps) do
+  if string.lower(map.lhs) == "<left>" then
+    has_response_left = true
+  end
+end
+local second_picker = t.open_inline_dropdown("AI Ask", t.preset_items("ask"), function() end)
+local response_closed_by_replacement = not vim.api.nvim_win_is_valid(response.win)
+second_picker.close()
 
 local input = t.open_inline_input("Ask AI edit", "Describe", function() end)
 local input_imaps = vim.api.nvim_buf_get_keymap(input.buf, "i")
@@ -46,12 +62,14 @@ end
 input.close()
 vim.cmd = old_cmd
 
-if has_ctrl_c and has_input_ctrl_c then
-  print("SUCCESS: Popup close mappings include Ctrl-C and lifecycle autoclose hooks are installed.")
+if has_ctrl_c and has_left and has_input_ctrl_c and has_response_left and response_closed_by_replacement then
+  print("SUCCESS: Popup close mappings and active-popup replacement behavior are installed.")
   vim.cmd("qall!")
 else
   print("FAILURE: Popup close mappings missing expected keys")
-  print("has_ctrl_c", has_ctrl_c)
+  print("has_left", has_left)
   print("has_input_ctrl_c", has_input_ctrl_c)
+  print("has_response_left", has_response_left)
+  print("response_closed_by_replacement", response_closed_by_replacement)
   vim.cmd("cquit")
 end
