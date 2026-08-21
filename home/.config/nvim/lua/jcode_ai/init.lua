@@ -6,6 +6,8 @@ local ui_ns = vim.api.nvim_create_namespace("jcode_ai_inline_ui")
 M._setup_done = false
 M._state = {}
 M._active_popup = nil
+M._active_request = nil
+M._last_request = nil
 
 local current_context
 local clear_inline_hint
@@ -219,7 +221,7 @@ local function run_jcode_command(cmd)
 end
 
 local function run_jcode_command_async(cmd, on_exit)
-  vim.system(cmd, { text = true }, vim.schedule_wrap(function(result)
+  return vim.system(cmd, { text = true }, vim.schedule_wrap(function(result)
     local parsed = parse_panel_output(result.stdout)
     on_exit(result, parsed)
   end))
@@ -267,6 +269,58 @@ local function active_popup_contains(win)
     end
   end
   return false
+end
+
+local function current_request_snapshot()
+  local request = M._active_request or M._last_request
+  if not request then
+    return {
+      status = "idle",
+      session_id = "",
+      prompt = "",
+      message = "No request yet",
+      response = "",
+      mode = "ask",
+      active = false,
+    }
+  end
+  return {
+    status = tostring(request.status or "idle"),
+    session_id = tostring(request.session_id or ""),
+    prompt = tostring(request.prompt or ""),
+    message = tostring(request.message or ""),
+    response = tostring(request.response or ""),
+    mode = tostring(request.mode or "ask"),
+    active = M._active_request == request,
+  }
+end
+
+local function set_active_request(request)
+  M._active_request = request
+  M._last_request = request
+end
+
+local function clear_active_request(request)
+  if request == nil or M._active_request == request then
+    M._active_request = nil
+  end
+  if request ~= nil then
+    M._last_request = request
+  end
+end
+
+local function cancel_active_request()
+  local request = M._active_request
+  if not request or not request.proc or request.status ~= "running" then
+    return false
+  end
+  request.cancelled = true
+  request.status = "cancelled"
+  request.message = "Cancellation requested"
+  if request.proc.kill then
+    pcall(request.proc.kill, request.proc, 15)
+  end
+  return true
 end
 
 local function cursor_anchor()
@@ -327,43 +381,27 @@ local function set_close_keys(buf, win, extra)
   end
 end
 
-local function open_feedback_tui(mode, start_line, end_line, on_submit)
+local function open_feedback_tui(mode)
   local history_buf = vim.api.nvim_create_buf(false, true)
-  local input_buf = vim.api.nvim_create_buf(false, true)
-  for _, buf in ipairs({ history_buf, input_buf }) do
-    vim.bo[buf].bufhidden = "wipe"
-    vim.bo[buf].buftype = "nofile"
-    vim.bo[buf].swapfile = false
-  end
+  vim.bo[history_buf].bufhidden = "wipe"
+  vim.bo[history_buf].buftype = "nofile"
+  vim.bo[history_buf].swapfile = false
 
-  local title = mode == "edit" and "Jcode Edit TUI" or "Jcode Ask TUI"
-  local prompt_label = mode == "edit" and "Describe the code change" or "Ask about this code"
+  local title = mode == "edit" and "Jcode Edit Status" or "Jcode Ask Status"
   local mode_name = mode == "edit" and "EDIT" or "ASK"
-  local history_lines = {
-    string.format("[%s] %s", mode_name, prompt_label),
-    "Enter/Tab send  ·  Esc/q close  ·  Recent feedback",
-    "",
-  }
-  vim.list_extend(history_lines, recent_feedback_lines(mode, 6))
-  vim.api.nvim_buf_set_lines(history_buf, 0, -1, false, history_lines)
-  vim.bo[history_buf].modifiable = false
-
-  vim.api.nvim_buf_set_lines(input_buf, 0, -1, false, { "> " })
-
   local width = math.min(math.max(72, #title + 20), math.max(vim.o.columns - 8, 24))
-  local history_height = math.min(math.max(#history_lines, 8), math.max(vim.o.lines - 8, 8))
-  local input_height = 1
+  local height = math.min(14, math.max(vim.o.lines - 10, 8))
   local anchor = cursor_anchor()
-  local base_row = math.max(anchor.row - 1, 1)
-  local base_col = anchor.col
+  local row = math.max(anchor.row - 1, 1)
+  local col = anchor.col
 
-  local history_win = vim.api.nvim_open_win(history_buf, false, {
+  local history_win = vim.api.nvim_open_win(history_buf, true, {
     relative = "win",
     win = vim.api.nvim_get_current_win(),
-    row = base_row,
-    col = base_col,
+    row = row,
+    col = col,
     width = width,
-    height = history_height,
+    height = height,
     border = "rounded",
     style = "minimal",
     title = title,
@@ -373,66 +411,57 @@ local function open_feedback_tui(mode, start_line, end_line, on_submit)
   })
   vim.wo[history_win].winhl = "NormalFloat:NormalFloat,FloatBorder:FloatBorder"
 
-  local input_win = vim.api.nvim_open_win(input_buf, true, {
-    relative = "win",
-    win = vim.api.nvim_get_current_win(),
-    row = base_row + history_height + 1,
-    col = base_col,
-    width = width,
-    height = input_height,
-    border = "rounded",
-    style = "minimal",
-    title = "Prompt",
-    title_pos = "left",
-    noautocmd = true,
-    zindex = 176,
-  })
-  vim.wo[input_win].winhl = "NormalFloat:Pmenu,FloatBorder:FloatBorder"
-
-  register_active_popup({ history_win, input_win }, function()
+  register_active_popup(history_win, function()
     clear_inline_hint(0)
   end)
 
-  local function submit()
-    local input = table.concat(vim.api.nvim_buf_get_lines(input_buf, 0, 1, false), "")
-    input = vim.trim((input:gsub("^>%s*", "")))
-    close_active_popup()
-    if input ~= "" then
-      on_submit(input, {
-        mode = mode,
-        start_line = start_line,
-        end_line = end_line,
-      })
+  local function render_history(status_override)
+    local request = status_override or current_request_snapshot()
+    local status_parts = {
+      string.format("[%s] %s", mode_name, request.status),
+      request.active and "live" or "saved",
+    }
+    if request.session_id ~= "" then
+      table.insert(status_parts, request.session_id)
     end
+    local lines = {
+      table.concat(status_parts, "  •  "),
+      "Enter/r refresh  ·  x cancel  ·  Esc/q close",
+      "",
+      string.format("Prompt: %s", request.prompt ~= "" and trim_preview(request.prompt, width - 12) or "[none yet]"),
+      string.format("Status: %s", request.message ~= "" and trim_preview(request.message, width - 12) or "Ready"),
+    }
+    if request.response and request.response ~= "" then
+      table.insert(lines, string.format("Reply: %s", trim_preview(request.response, width - 11)))
+    end
+    table.insert(lines, "")
+    table.insert(lines, "Recent")
+    vim.list_extend(lines, recent_feedback_lines(mode, 5))
+    vim.bo[history_buf].modifiable = true
+    vim.api.nvim_buf_set_lines(history_buf, 0, -1, false, lines)
+    vim.bo[history_buf].modifiable = false
   end
 
+  render_history()
   set_close_keys(history_buf, history_win, function(close)
     vim.keymap.set("n", "<CR>", function()
-      if vim.api.nvim_win_is_valid(input_win) then
-        vim.api.nvim_set_current_win(input_win)
+      render_history()
+    end, { buffer = history_buf, nowait = true, silent = true })
+    vim.keymap.set("n", "r", function()
+      render_history()
+    end, { buffer = history_buf, nowait = true, silent = true })
+    vim.keymap.set("n", "x", function()
+      if cancel_active_request() then
+        render_history(current_request_snapshot())
       end
     end, { buffer = history_buf, nowait = true, silent = true })
   end)
 
-  set_close_keys(input_buf, input_win, function(close)
-    vim.keymap.set("i", "<Esc>", close, { buffer = input_buf, nowait = true, silent = true })
-    vim.keymap.set("i", "<C-c>", close, { buffer = input_buf, nowait = true, silent = true })
-    vim.keymap.set("i", "<CR>", submit, { buffer = input_buf, nowait = true, silent = true })
-    vim.keymap.set("i", "<Tab>", submit, { buffer = input_buf, nowait = true, silent = true })
-    vim.keymap.set("n", "<CR>", submit, { buffer = input_buf, nowait = true, silent = true })
-    vim.keymap.set("n", "<Tab>", submit, { buffer = input_buf, nowait = true, silent = true })
-  end)
-
-  vim.api.nvim_win_set_cursor(input_win, { 1, 2 })
-  vim.cmd("startinsert")
-
   return {
     history_buf = history_buf,
-    input_buf = input_buf,
     history_win = history_win,
-    input_win = input_win,
-    submit = submit,
     close = close_active_popup,
+    render = render_history,
   }
 end
 
@@ -743,6 +772,16 @@ function M.send_prompt_async(prompt, opts, callback)
   callback = callback or function() end
   local client = load_client_state()
   local full_prompt = build_context_prompt(prompt, opts)
+  local request = {
+    prompt = prompt,
+    mode = tostring(opts.mode or "ask"),
+    status = "running",
+    session_id = client.session_id,
+    message = "Running request...",
+    response = "",
+    cancelled = false,
+  }
+  set_active_request(request)
 
   local function build_cmd(session_id)
     local cmd = { "jcode" }
@@ -764,30 +803,44 @@ function M.send_prompt_async(prompt, opts, callback)
     if parsed.session_id and parsed.session_id ~= "" then
       client.session_id = parsed.session_id
       save_client_state(client)
+      request.session_id = parsed.session_id
     end
-    callback({
+    request.response = parsed.text or ""
+    if request.cancelled then
+      request.status = "cancelled"
+      request.message = "Request cancelled"
+      request.response = request.response ~= "" and request.response or "cancelled"
+    else
+      request.status = result.code == 0 and "completed" or "failed"
+      request.message = result.code == 0 and "Request completed" or (result.stderr ~= "" and result.stderr or parsed.text)
+    end
+    local payload = {
       code = result.code,
       signal = result.signal,
       session_id = client.session_id ~= "" and client.session_id or parsed.session_id,
       text = parsed.text,
       stderr = result.stderr,
       ok = result.code == 0,
-    })
+      cancelled = request.cancelled,
+    }
+    clear_active_request(request)
+    callback(payload)
   end
 
   local used_resume = client.session_id ~= ""
-  run_jcode_command_async(build_cmd(client.session_id), function(result, parsed)
+  request.proc = run_jcode_command_async(build_cmd(client.session_id), function(result, parsed)
     if used_resume and result.code ~= 0 then
       local error_text = table.concat({ result.stderr or "", parsed.text or "" }, "\n")
       if looks_like_resume_session_error(error_text) then
         client.session_id = ""
         save_client_state(client)
-        run_jcode_command_async(build_cmd(""), finish)
+        request.proc = run_jcode_command_async(build_cmd(""), finish)
         return
       end
     end
     finish(result, parsed)
   end)
+  return request
 end
 
 local function show_response_window(title, text)
@@ -836,10 +889,14 @@ function M.ask_agent_edit(prompt, opts)
 end
 
 function M.ask_agent_edit_async(prompt, opts, callback)
+  opts = opts or {}
   callback = callback or function() end
-  M.send_prompt_async(prompt, vim.tbl_extend("force", opts or {}, { mode = "edit" }), function(result)
+  local tui = opts.tui
+  return M.send_prompt_async(prompt, vim.tbl_extend("force", opts or {}, { mode = "edit" }), function(result)
     local err = nil
-    if not result.ok then
+    if result.cancelled then
+      err = "cancelled"
+    elseif not result.ok then
       err = result.stderr ~= "" and result.stderr or result.text
     elseif result.text == "" then
       err = "empty_response"
@@ -853,6 +910,9 @@ function M.ask_agent_edit_async(prompt, opts, callback)
       response = err and ("error: " .. err) or "preview ready",
       status = err and "error" or "ok",
     })
+    if tui and tui.render then
+      tui.render(current_request_snapshot())
+    end
     callback(result, err)
   end)
 end
@@ -868,15 +928,24 @@ function M.ask_agent(prompt, opts)
 end
 
 function M.ask_agent_async(prompt, opts, callback)
+  opts = opts or {}
   callback = callback or function() end
-  M.send_prompt_async(prompt, vim.tbl_extend("force", opts or {}, { mode = "ask" }), function(result)
+  local tui = opts.tui
+  return M.send_prompt_async(prompt, vim.tbl_extend("force", opts or {}, { mode = "ask" }), function(result)
     append_feedback_history({
       mode = "ask",
       prompt = prompt,
-      response = result.ok and result.text or (result.stderr ~= "" and result.stderr or result.text),
-      status = result.ok and "ok" or "error",
+      response = result.cancelled and "cancelled" or (result.ok and result.text or (result.stderr ~= "" and result.stderr or result.text)),
+      status = result.cancelled and "cancelled" or (result.ok and "ok" or "error"),
     })
-    if result.ok then
+    if tui and tui.render then
+      tui.render(current_request_snapshot())
+    end
+    if result.cancelled then
+      vim.notify("Jcode request cancelled", vim.log.levels.WARN)
+    elseif tui and tui.render then
+      vim.notify("Jcode reply ready", vim.log.levels.INFO)
+    elseif result.ok then
       show_response_window("Jcode Quick Ask", result.text)
     else
       show_response_window("Jcode Quick Ask Error", result.stderr ~= "" and result.stderr or result.text)
@@ -1152,11 +1221,19 @@ local function prompt_request(start_line, end_line)
   end)
 end
 
-local function run_prompt_action(mode, input, start_line, end_line)
+local function open_status_popup(mode)
+  local snapshot = current_request_snapshot()
+  local resolved_mode = mode or snapshot.mode or "ask"
+  return open_feedback_tui(resolved_mode)
+end
+
+local function run_prompt_action(mode, input, start_line, end_line, meta)
+  local status_popup = meta and meta.status_popup or open_status_popup(mode)
   local request_opts = {
     bufnr = 0,
     start_line = start_line,
     end_line = end_line,
+    tui = status_popup,
   }
 
   if mode == "edit" then
@@ -1183,7 +1260,7 @@ local function open_prompt_picker(mode, start_line, end_line)
       return
     end
 
-    open_feedback_tui(mode, start_line, end_line, function(input)
+    open_inline_input(mode == "edit" and "Edit prompt" or "Ask prompt", "", function(input)
       run_prompt_action(mode, input, start_line, end_line)
     end)
   end)
@@ -1326,6 +1403,10 @@ local function create_commands()
       end_line = cmd.range > 0 and cmd.line2 or nil,
     })
   end, { nargs = "+", range = true, desc = "Send a quick ask directly to Jcode with current Neovim context" })
+
+  vim.api.nvim_create_user_command("AIStatus", function()
+    open_status_popup()
+  end, { nargs = 0, desc = "Open Jcode status and feedback popup" })
 end
 
 local function create_keymaps()
@@ -1349,9 +1430,13 @@ local function create_keymaps()
     M.prompt_current_line_agent_ask()
   end, { desc = "AI Quick Ask" })
 
-  vim.keymap.set("x", "<leader>aq", function()
-    M.prompt_visual_agent_ask()
-  end, { desc = "AI Quick Ask" })
+  vim.keymap.set("n", "<leader>as", function()
+    open_status_popup()
+  end, { desc = "AI Status" })
+
+  vim.keymap.set("x", "<leader>as", function()
+    open_status_popup()
+  end, { desc = "AI Status" })
 end
 
 local function mcp_success(data)
@@ -1509,6 +1594,9 @@ M._test = {
   show_response_window = show_response_window,
   load_feedback_history = load_feedback_history,
   append_feedback_history = append_feedback_history,
+  current_request_snapshot = current_request_snapshot,
+  cancel_active_request = cancel_active_request,
+  open_status_popup = open_status_popup,
 }
 
 return M

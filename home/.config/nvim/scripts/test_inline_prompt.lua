@@ -4,7 +4,7 @@ local ai = require("jcode_ai")
 local t = ai._test
 
 assert(t and t.send_prompt_async and t.ask_agent_edit_async and t.ask_agent_async, "missing async test hooks")
-assert(t.open_feedback_tui and t.load_feedback_history, "missing feedback TUI hooks")
+assert(t.open_feedback_tui and t.open_inline_input and t.open_status_popup and t.load_feedback_history, "missing status popup hooks")
 
 local history_path = vim.fn.stdpath("state") .. "/jcode_ai/feedback_history.json"
 pcall(vim.fn.delete, history_path)
@@ -32,14 +32,16 @@ end)
 local dropdown_lines = vim.api.nvim_buf_get_lines(dropdown.buf, 0, -1, false)
 dropdown.pick(2)
 
-local feedback_submit
-local feedback = t.open_feedback_tui("ask", 1, 1, function(value)
-  feedback_submit = value
+local inline_submit
+local inline_input = t.open_inline_input("Ask prompt", "", function(value)
+  inline_submit = value
 end)
-local feedback_history_lines_before = vim.api.nvim_buf_get_lines(feedback.history_buf, 0, -1, false)
-local feedback_input_lines_before = vim.api.nvim_buf_get_lines(feedback.input_buf, 0, -1, false)
-vim.api.nvim_buf_set_lines(feedback.input_buf, 0, -1, false, { "> custom follow-up" })
-feedback.submit()
+vim.api.nvim_buf_set_lines(inline_input.buf, 0, -1, false, { "> custom follow-up" })
+inline_input.submit()
+
+local status_popup = t.open_feedback_tui("ask")
+local status_lines_before = vim.api.nvim_buf_get_lines(status_popup.history_buf, 0, -1, false)
+status_popup.close()
 
 local async_calls = {}
 local old_system = vim.system
@@ -56,35 +58,46 @@ vim.system = function(cmd, opts, on_exit)
       or '{"session_id":"session_async_2","type":"assistant_final","text":"async answer"}\n',
     stderr = "",
   }
+  local proc = {
+    wait = function() return result end,
+    kill = function() end,
+  }
   if on_exit then
-    on_exit(result)
-    return { wait = function() return result end }
+    vim.schedule(function()
+      on_exit(result)
+    end)
   end
-  return { wait = function() return result end }
+  return proc
 end
 
+local edit_popup = t.open_status_popup("edit")
 local edit_done = false
 local edit_result, edit_err
-ai.ask_agent_edit_async("Fix this", { bufnr = bufnr, start_line = 1, end_line = 1 }, function(result, err)
+ai.ask_agent_edit_async("Fix this", { bufnr = bufnr, start_line = 1, end_line = 1, tui = edit_popup }, function(result, err)
   edit_result = result
   edit_err = err
   edit_done = true
 end)
 assert(vim.wait(1000, function() return edit_done end, 20), "expected async edit callback")
+local edit_popup_lines = vim.api.nvim_buf_get_lines(edit_popup.history_buf, 0, -1, false)
+edit_popup.close()
 
+local ask_popup = t.open_status_popup("ask")
 local ask_done = false
 local ask_result
-ai.ask_agent_async("Explain this", { bufnr = bufnr, start_line = 1, end_line = 1 }, function(result)
+ai.ask_agent_async("Explain this", { bufnr = bufnr, start_line = 1, end_line = 1, tui = ask_popup }, function(result)
   ask_result = result
   ask_done = true
 end)
 assert(vim.wait(1000, function() return ask_done end, 20), "expected async ask callback")
+local ask_popup_lines = vim.api.nvim_buf_get_lines(ask_popup.history_buf, 0, -1, false)
+ask_popup.close()
 
 vim.system = old_system
 vim.cmd = old_cmd
 
 local history = t.load_feedback_history()
-local feedback_after = t.open_feedback_tui("ask", 1, 1, function() end)
+local feedback_after = t.open_feedback_tui("ask")
 local feedback_history_lines_after = vim.api.nvim_buf_get_lines(feedback_after.history_buf, 0, -1, false)
 feedback_after.close()
 
@@ -93,31 +106,39 @@ local response_win_after = #vim.api.nvim_list_wins()
 local ok = dropdown_lines[1]:match("Custom prompt")
   and dropdown_lines[2]:match("Fix the code")
   and dropdown_pick and dropdown_pick.prompt == "Fix the code on this line or selection."
-  and feedback_history_lines_before[4] and feedback_history_lines_before[4]:match("No history yet")
-  and feedback_input_lines_before[1] == "> "
-  and feedback_submit == "custom follow-up"
+  and inline_submit == "custom follow-up"
+  and status_lines_before[1] and status_lines_before[1]:match("%[ASK%] idle")
+  and status_lines_before[4] and status_lines_before[4]:match("%[none yet%]")
+  and status_lines_before[5] and status_lines_before[5]:match("No request yet")
   and #async_calls == 2
   and edit_done and edit_result and edit_result.ok and edit_err == nil
+  and edit_popup_lines[1] and edit_popup_lines[1]:match("%[EDIT%] completed")
+  and edit_popup_lines[4] and edit_popup_lines[4]:match("Fix this")
   and ask_done and ask_result and ask_result.ok and ask_result.text == "async answer"
+  and ask_popup_lines[1] and ask_popup_lines[1]:match("%[ASK%] completed")
+  and ask_popup_lines[5] and ask_popup_lines[5]:match("Request completed")
+  and ask_popup_lines[6] and ask_popup_lines[6]:match("async answer")
   and preview.active
   and history[1] and history[1].prompt == "Explain this"
   and history[1].response == "async answer"
   and history[2] and history[2].prompt == "Fix this"
-  and feedback_history_lines_after[4] and feedback_history_lines_after[4]:match("Explain this")
+  and feedback_history_lines_after[9] and feedback_history_lines_after[9]:match("Explain this")
+  and response_win_after == response_win_before
 
 if ok then
-  print("SUCCESS: Feedback TUI history, async prompt flow, and response rendering behave as expected!")
+  print("SUCCESS: Primary inline composer plus secondary status popup behave as expected!")
   vim.cmd("qall!")
 else
-  print("FAILURE: Feedback TUI smoke test failed")
+  print("FAILURE: Status popup smoke test failed")
   print("dropdown_lines", vim.inspect(dropdown_lines))
   print("dropdown_pick", vim.inspect(dropdown_pick))
-  print("feedback_history_lines_before", vim.inspect(feedback_history_lines_before))
-  print("feedback_input_lines_before", vim.inspect(feedback_input_lines_before))
-  print("feedback_submit", vim.inspect(feedback_submit))
+  print("inline_submit", vim.inspect(inline_submit))
+  print("status_lines_before", vim.inspect(status_lines_before))
   print("async_calls", vim.inspect(async_calls))
   print("edit_done", edit_done, "edit_err", vim.inspect(edit_err), "edit_result", vim.inspect(edit_result))
+  print("edit_popup_lines", vim.inspect(edit_popup_lines))
   print("ask_done", ask_done, "ask_result", vim.inspect(ask_result))
+  print("ask_popup_lines", vim.inspect(ask_popup_lines))
   print("history", vim.inspect(history))
   print("feedback_history_lines_after", vim.inspect(feedback_history_lines_after))
   print("preview", vim.inspect(preview))
