@@ -19,6 +19,10 @@ local function client_state_path()
   return state_dir() .. "/client.json"
 end
 
+local function feedback_history_path()
+  return state_dir() .. "/feedback_history.json"
+end
+
 local function requests_dir()
   return state_dir() .. "/requests"
 end
@@ -101,6 +105,62 @@ local function save_client_state(state)
   })
 end
 
+local function load_feedback_history()
+  local history = read_json_file(feedback_history_path())
+  if type(history) ~= "table" then
+    return {}
+  end
+  return history
+end
+
+local function save_feedback_history(history)
+  ensure_dir(state_dir())
+  write_json_file(feedback_history_path(), history)
+end
+
+local function trim_preview(text, limit)
+  local normalized = vim.trim(tostring(text or ""):gsub("\n", " "))
+  limit = limit or 90
+  if #normalized <= limit then
+    return normalized
+  end
+  return normalized:sub(1, math.max(limit - 1, 1)) .. "…"
+end
+
+local function append_feedback_history(entry)
+  local history = load_feedback_history()
+  table.insert(history, 1, {
+    mode = tostring(entry.mode or "ask"),
+    prompt = tostring(entry.prompt or ""),
+    response = tostring(entry.response or ""),
+    status = tostring(entry.status or "ok"),
+    created_at = tostring(entry.created_at or now_iso()),
+  })
+  while #history > 20 do
+    table.remove(history)
+  end
+  save_feedback_history(history)
+end
+
+local function recent_feedback_lines(mode, limit)
+  local history = load_feedback_history()
+  local lines = {}
+  limit = limit or 6
+  for _, item in ipairs(history) do
+    if item.mode == mode then
+      table.insert(lines, string.format("• %s", trim_preview(item.prompt, 72)))
+      table.insert(lines, string.format("  ↳ %s", trim_preview(item.response ~= "" and item.response or item.status, 72)))
+      if #lines >= limit * 2 then
+        break
+      end
+    end
+  end
+  if vim.tbl_isempty(lines) then
+    return { "• No history yet", "  ↳ Your recent prompts and results will appear here" }
+  end
+  return lines
+end
+
 local function emit_user_event(pattern, data)
   pcall(vim.api.nvim_exec_autocmds, "User", {
     pattern = pattern,
@@ -180,15 +240,33 @@ local function close_active_popup()
   if popup.on_close then
     pcall(popup.on_close)
   end
-  close_window(popup.win)
+  local wins = popup.wins or (popup.win and { popup.win }) or {}
+  for _, win in ipairs(wins) do
+    close_window(win)
+  end
 end
 
-local function register_active_popup(win, on_close)
+local function register_active_popup(win_or_wins, on_close)
   close_active_popup()
+  local wins = type(win_or_wins) == "table" and win_or_wins or { win_or_wins }
   M._active_popup = {
-    win = win,
+    wins = wins,
+    win = wins[1],
     on_close = on_close,
   }
+end
+
+local function active_popup_contains(win)
+  local popup = M._active_popup
+  if not popup or not popup.wins then
+    return false
+  end
+  for _, popup_win in ipairs(popup.wins) do
+    if popup_win == win then
+      return true
+    end
+  end
+  return false
 end
 
 local function cursor_anchor()
@@ -227,7 +305,7 @@ end
 
 local function set_close_keys(buf, win, extra)
   local function close()
-    if M._active_popup and M._active_popup.win == win then
+    if active_popup_contains(win) then
       close_active_popup()
       return
     end
@@ -247,6 +325,115 @@ local function set_close_keys(buf, win, extra)
   if extra then
     extra(close)
   end
+end
+
+local function open_feedback_tui(mode, start_line, end_line, on_submit)
+  local history_buf = vim.api.nvim_create_buf(false, true)
+  local input_buf = vim.api.nvim_create_buf(false, true)
+  for _, buf in ipairs({ history_buf, input_buf }) do
+    vim.bo[buf].bufhidden = "wipe"
+    vim.bo[buf].buftype = "nofile"
+    vim.bo[buf].swapfile = false
+  end
+
+  local title = mode == "edit" and "Jcode Edit TUI" or "Jcode Ask TUI"
+  local prompt_label = mode == "edit" and "Describe the code change" or "Ask about this code"
+  local mode_name = mode == "edit" and "EDIT" or "ASK"
+  local history_lines = {
+    string.format("[%s] %s", mode_name, prompt_label),
+    "Enter/Tab send  ·  Esc/q close  ·  Recent feedback",
+    "",
+  }
+  vim.list_extend(history_lines, recent_feedback_lines(mode, 6))
+  vim.api.nvim_buf_set_lines(history_buf, 0, -1, false, history_lines)
+  vim.bo[history_buf].modifiable = false
+
+  vim.api.nvim_buf_set_lines(input_buf, 0, -1, false, { "> " })
+
+  local width = math.min(math.max(72, #title + 20), math.max(vim.o.columns - 8, 24))
+  local history_height = math.min(math.max(#history_lines, 8), math.max(vim.o.lines - 8, 8))
+  local input_height = 1
+  local anchor = cursor_anchor()
+  local base_row = math.max(anchor.row - 1, 1)
+  local base_col = anchor.col
+
+  local history_win = vim.api.nvim_open_win(history_buf, false, {
+    relative = "win",
+    win = vim.api.nvim_get_current_win(),
+    row = base_row,
+    col = base_col,
+    width = width,
+    height = history_height,
+    border = "rounded",
+    style = "minimal",
+    title = title,
+    title_pos = "left",
+    noautocmd = true,
+    zindex = 175,
+  })
+  vim.wo[history_win].winhl = "NormalFloat:NormalFloat,FloatBorder:FloatBorder"
+
+  local input_win = vim.api.nvim_open_win(input_buf, true, {
+    relative = "win",
+    win = vim.api.nvim_get_current_win(),
+    row = base_row + history_height + 1,
+    col = base_col,
+    width = width,
+    height = input_height,
+    border = "rounded",
+    style = "minimal",
+    title = "Prompt",
+    title_pos = "left",
+    noautocmd = true,
+    zindex = 176,
+  })
+  vim.wo[input_win].winhl = "NormalFloat:Pmenu,FloatBorder:FloatBorder"
+
+  register_active_popup({ history_win, input_win }, function()
+    clear_inline_hint(0)
+  end)
+
+  local function submit()
+    local input = table.concat(vim.api.nvim_buf_get_lines(input_buf, 0, 1, false), "")
+    input = vim.trim((input:gsub("^>%s*", "")))
+    close_active_popup()
+    if input ~= "" then
+      on_submit(input, {
+        mode = mode,
+        start_line = start_line,
+        end_line = end_line,
+      })
+    end
+  end
+
+  set_close_keys(history_buf, history_win, function(close)
+    vim.keymap.set("n", "<CR>", function()
+      if vim.api.nvim_win_is_valid(input_win) then
+        vim.api.nvim_set_current_win(input_win)
+      end
+    end, { buffer = history_buf, nowait = true, silent = true })
+  end)
+
+  set_close_keys(input_buf, input_win, function(close)
+    vim.keymap.set("i", "<Esc>", close, { buffer = input_buf, nowait = true, silent = true })
+    vim.keymap.set("i", "<C-c>", close, { buffer = input_buf, nowait = true, silent = true })
+    vim.keymap.set("i", "<CR>", submit, { buffer = input_buf, nowait = true, silent = true })
+    vim.keymap.set("i", "<Tab>", submit, { buffer = input_buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<CR>", submit, { buffer = input_buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<Tab>", submit, { buffer = input_buf, nowait = true, silent = true })
+  end)
+
+  vim.api.nvim_win_set_cursor(input_win, { 1, 2 })
+  vim.cmd("startinsert")
+
+  return {
+    history_buf = history_buf,
+    input_buf = input_buf,
+    history_win = history_win,
+    input_win = input_win,
+    submit = submit,
+    close = close_active_popup,
+  }
 end
 
 local function open_inline_input(title, placeholder, on_submit)
@@ -660,6 +847,12 @@ function M.ask_agent_edit_async(prompt, opts, callback)
       local _, preview_err = M.preview_edit_response(result.text, opts)
       err = preview_err
     end
+    append_feedback_history({
+      mode = "edit",
+      prompt = prompt,
+      response = err and ("error: " .. err) or "preview ready",
+      status = err and "error" or "ok",
+    })
     callback(result, err)
   end)
 end
@@ -677,6 +870,12 @@ end
 function M.ask_agent_async(prompt, opts, callback)
   callback = callback or function() end
   M.send_prompt_async(prompt, vim.tbl_extend("force", opts or {}, { mode = "ask" }), function(result)
+    append_feedback_history({
+      mode = "ask",
+      prompt = prompt,
+      response = result.ok and result.text or (result.stderr ~= "" and result.stderr or result.text),
+      status = result.ok and "ok" or "error",
+    })
     if result.ok then
       show_response_window("Jcode Quick Ask", result.text)
     else
@@ -984,13 +1183,9 @@ local function open_prompt_picker(mode, start_line, end_line)
       return
     end
 
-    open_inline_input(
-      mode == "edit" and "Ask AI edit" or "Quick ask Jcode",
-      mode == "edit" and "Describe the change you want" or "Ask about this line or selection",
-      function(input)
-        run_prompt_action(mode, input, start_line, end_line)
-      end
-    )
+    open_feedback_tui(mode, start_line, end_line, function(input)
+      run_prompt_action(mode, input, start_line, end_line)
+    end)
   end)
 end
 
@@ -1301,6 +1496,7 @@ M._test = {
   preset_items = preset_items,
   open_inline_dropdown = open_inline_dropdown,
   open_inline_input = open_inline_input,
+  open_feedback_tui = open_feedback_tui,
   open_prompt_picker = open_prompt_picker,
   run_prompt_action = run_prompt_action,
   show_inline_hint = show_inline_hint,
@@ -1311,6 +1507,8 @@ M._test = {
   ask_agent_async = M.ask_agent_async,
   close_active_popup = close_active_popup,
   show_response_window = show_response_window,
+  load_feedback_history = load_feedback_history,
+  append_feedback_history = append_feedback_history,
 }
 
 return M
